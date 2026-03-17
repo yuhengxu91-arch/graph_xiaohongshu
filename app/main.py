@@ -25,6 +25,14 @@ from app.graph.utils import setup_checkpointer, close_checkpointer
 from app.api.v1.workflow import router as workflow_router
 from app.api.v1.image import router as image_router
 from app.api.v1.auth import router as auth_router
+from app.api.v1.poster import router as poster_router
+from app.api.v1.batch import router as batch_router
+from app.api.v1.gallery import router as gallery_router
+from app.api.v1.brand import router as brand_router
+from app.api.v1.user_template import router as template_router
+from app.api.v1.profile import router as profile_router
+from app.api.v1.platform import router as platform_router
+from app.api.v1.calendar import router as calendar_router
 
 # 初始化日志系统（在导入其他模块之前）
 setup_logging(
@@ -137,6 +145,14 @@ app.add_middleware(
 app.include_router(auth_router, prefix="/api/v1")
 app.include_router(workflow_router, prefix="/api/v1")
 app.include_router(image_router, prefix="/api/v1")
+app.include_router(poster_router, prefix="/api/v1")
+app.include_router(batch_router, prefix="/api/v1")
+app.include_router(gallery_router, prefix="/api/v1")
+app.include_router(brand_router, prefix="/api/v1")
+app.include_router(template_router, prefix="/api/v1")
+app.include_router(profile_router, prefix="/api/v1")
+app.include_router(platform_router, prefix="/api/v1")
+app.include_router(calendar_router, prefix="/api/v1")
 
 # 挂载静态文件目录（用于访问生成的图片）
 static_dir = Path(__file__).parent.parent / "static"
@@ -146,7 +162,7 @@ app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
 @app.get("/")
 async def root():
-    """根路径 - 服务健康检查"""
+    """项目根路径 - 服务信息"""
     return {
         "service": settings.app_name,
         "status": "running",

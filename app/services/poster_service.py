@@ -1,0 +1,851 @@
+"""
+海报/封面生成服务模块
+支持四种模式：自定义生成、模板生成、以图改图、风格迁移
+使用混合合成架构：AI 生成背景 + 程序叠加文字
+"""
+import os
+import json
+import uuid
+import asyncio
+import base64
+import httpx
+from pathlib import Path
+from typing import List, Optional, Dict, Any
+from datetime import datetime
+from dotenv import load_dotenv
+
+load_dotenv()
+
+
+# ======================== 尺寸预设 ========================
+ASPECT_RATIOS: Dict[str, Dict[str, Any]] = {
+    "3:4":    {"width": 1080, "height": 1440, "label": "小红书"},
+    "2.35:1": {"width": 1080, "height": 460,  "label": "公众号"},
+    "9:16":   {"width": 1080, "height": 1920, "label": "抖音"},
+    "1:1":    {"width": 1080, "height": 1080, "label": "正方形"},
+    "16:9":   {"width": 1920, "height": 1080, "label": "横版"},
+}
+
+
+class PosterService:
+    """海报生成服务类"""
+
+    def __init__(self):
+        # AI 图片生成 API 配置（复用 image_service 的配置）
+        self.api_key = os.getenv("IMAGE_API_KEY", "")
+        self.base_url = os.getenv("IMAGE_BASE_URL", "https://cn-beijing.yuannengai.com")
+        self.model = os.getenv("IMAGE_MODEL", "gemini-3-pro-image-preview")
+
+        # 输出目录
+        self.output_dir = Path("static/images/posters")
+        self.output_dir.mkdir(parents=True, exist_ok=True)
+
+        # 加载预置数据
+        self._templates: List[Dict] = []
+        self._style_tags: List[Dict] = []
+        self._load_preset_data()
+
+        if not self.api_key:
+            raise ValueError("IMAGE_API_KEY 未配置，海报生成服务无法启动")
+
+    # ======================== 预置数据加载 ========================
+
+    def _load_preset_data(self):
+        """加载预置模板和风格标签数据"""
+        data_dir = Path(__file__).parent.parent / "data"
+
+        # 加载模板
+        templates_file = data_dir / "poster_templates.json"
+        if templates_file.exists():
+            with open(templates_file, "r", encoding="utf-8") as f:
+                self._templates = json.load(f)
+            print(f"[PosterService] 已加载 {len(self._templates)} 个预置模板")
+
+        # 加载风格标签
+        tags_file = data_dir / "style_tags.json"
+        if tags_file.exists():
+            with open(tags_file, "r", encoding="utf-8") as f:
+                self._style_tags = json.load(f)
+            print(f"[PosterService] 已加载 {len(self._style_tags)} 个风格标签")
+
+    # ======================== 对外接口 ========================
+
+    def get_templates(self) -> List[Dict]:
+        """获取所有预置模板列表"""
+        return self._templates
+
+    def get_template_by_index(self, index: int) -> Optional[Dict]:
+        """按索引获取单个模板"""
+        if 0 <= index < len(self._templates):
+            return self._templates[index]
+        return None
+
+    def get_style_tags(self) -> List[Dict]:
+        """获取所有风格标签"""
+        return self._style_tags
+
+    def get_style_tag_by_name(self, name: str) -> Optional[Dict]:
+        """按名称获取风格标签"""
+        for tag in self._style_tags:
+            if tag["name"] == name or tag.get("name_en") == name:
+                return tag
+        return None
+
+    def get_aspect_ratios(self) -> Dict[str, Dict[str, Any]]:
+        """获取支持的尺寸比例"""
+        return ASPECT_RATIOS
+
+    # ======================== 自定义生成 ========================
+
+    async def generate_custom(
+        self,
+        prompt: str,
+        style_tags: Optional[List[str]] = None,
+        aspect_ratio: str = "3:4",
+        color_tone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        自定义生成海报
+
+        Args:
+            prompt: 用户输入的提示词
+            style_tags: 可选的风格标签名称列表
+            aspect_ratio: 输出比例，默认 3:4
+            color_tone: 可选的色调偏好
+
+        Returns:
+            包含图片 URL 和元信息的字典
+        """
+        # 1. 构建增强提示词
+        enhanced_prompt = self._build_custom_prompt(
+            prompt, style_tags, aspect_ratio, color_tone
+        )
+
+        # 2. 获取尺寸信息
+        ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
+
+        # 3. 调用 AI 生成图片
+        print(f"[PosterService] 自定义生成: {prompt[:50]}...")
+        image_base64 = await self._call_ai_image_api(enhanced_prompt)
+
+        if not image_base64:
+            return {
+                "success": False,
+                "error": "AI 图片生成失败，请稍后重试",
+                "prompt_used": enhanced_prompt,
+            }
+
+        # 4. 保存图片
+        image_url = self._save_image(image_base64, prefix="poster_custom")
+
+        return {
+            "success": True,
+            "image_url": image_url,
+            "prompt_used": enhanced_prompt,
+            "aspect_ratio": aspect_ratio,
+            "width": ratio_info["width"],
+            "height": ratio_info["height"],
+            "mode": "custom",
+        }
+
+    # ======================== 模板生成 ========================
+
+    async def generate_from_template(
+        self,
+        template_index: int,
+        params: Dict[str, str],
+        style_tag: Optional[str] = None,
+        color_option: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        模板生成海报
+
+        Args:
+            template_index: 模板索引
+            params: 用户填写的文案参数（如 title, subtitle 等）
+            style_tag: 可选的风格标签覆盖
+            color_option: 可选的色调选择
+            aspect_ratio: 可选的尺寸覆盖
+
+        Returns:
+            包含图片 URL 和元信息的字典
+        """
+        # 1. 获取模板配置
+        template = self.get_template_by_index(template_index)
+        if not template:
+            return {"success": False, "error": f"模板索引 {template_index} 不存在"}
+
+        config = template.get("config", {})
+
+        # 2. 验证必填参数
+        for slot in config.get("text_slots", []):
+            if slot.get("required") and not params.get(slot["name"]):
+                return {
+                    "success": False,
+                    "error": f"缺少必填参数: {slot['label']}",
+                }
+
+        # 3. 确定风格描述
+        effective_style = style_tag or template.get("style_tag", "")
+        style_desc = ""
+        if effective_style:
+            tag_info = self.get_style_tag_by_name(effective_style)
+            if tag_info:
+                style_desc = tag_info["prompt_snippet"]
+            else:
+                style_desc = effective_style
+
+        # 4. 确定色调
+        color_desc = color_option or (
+            config.get("color_options", ["自然"])[0]
+        )
+
+        # 5. 确定输出比例
+        effective_ratio = aspect_ratio or config.get("default_aspect_ratio", "3:4")
+        ratio_info = ASPECT_RATIOS.get(effective_ratio, ASPECT_RATIOS["3:4"])
+
+        # 6. 构建 AI 提示词 — 使用模板的 prompt 模板
+        ai_prompt_template = config.get(
+            "ai_prompt_template",
+            "生成一张'{title}'主题的海报背景，{style_desc}风格，{color_desc}色调，不含文字"
+        )
+
+        # 将参数填入模板
+        format_params = {
+            **params,
+            "style_desc": style_desc,
+            "color_desc": color_desc,
+        }
+
+        try:
+            ai_prompt = ai_prompt_template.format(**format_params)
+        except KeyError as e:
+            return {"success": False, "error": f"模板参数缺失: {e}"}
+
+        # 7. 添加尺寸约束
+        ai_prompt += f"\n\n图片比例要求：{effective_ratio}（{ratio_info['label']}平台适用）"
+
+        # 8. 调用 AI 生成
+        print(f"[PosterService] 模板生成 [{template['name']}]: {params.get('title', '')}")
+        image_base64 = await self._call_ai_image_api(ai_prompt)
+
+        if not image_base64:
+            return {
+                "success": False,
+                "error": "AI 图片生成失败，请稍后重试",
+                "prompt_used": ai_prompt,
+            }
+
+        # 9. 保存图片
+        image_url = self._save_image(image_base64, prefix="poster_tpl")
+
+        return {
+            "success": True,
+            "image_url": image_url,
+            "prompt_used": ai_prompt,
+            "template_name": template["name"],
+            "aspect_ratio": effective_ratio,
+            "width": ratio_info["width"],
+            "height": ratio_info["height"],
+            "mode": "template",
+            "params": params,
+        }
+
+    # ======================== 以图改图 ========================
+
+    async def generate_edit(
+        self,
+        image_base64: str,
+        edit_prompt: str,
+        aspect_ratio: str = "3:4",
+    ) -> Dict[str, Any]:
+        """
+        以图改图 — 上传原始图片 + 编辑指令，AI 修改图片内容
+
+        Args:
+            image_base64: 原始图片的 base64 编码数据
+            edit_prompt: 编辑指令（如"把背景换成海边日落"）
+            aspect_ratio: 输出比例
+
+        Returns:
+            包含图片 URL 和元信息的字典
+        """
+        # 构建编辑提示词
+        enhanced_prompt = self._build_edit_prompt(edit_prompt, aspect_ratio)
+        ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
+
+        print(f"[PosterService] 以图改图: {edit_prompt[:50]}...")
+        image_result_base64 = await self._call_ai_image_api(
+            enhanced_prompt, input_image_base64=image_base64
+        )
+
+        if not image_result_base64:
+            return {
+                "success": False,
+                "error": "AI 图片编辑失败，请稍后重试",
+                "prompt_used": enhanced_prompt,
+            }
+
+        image_url = self._save_image(image_result_base64, prefix="poster_edit")
+
+        return {
+            "success": True,
+            "image_url": image_url,
+            "prompt_used": enhanced_prompt,
+            "aspect_ratio": aspect_ratio,
+            "width": ratio_info["width"],
+            "height": ratio_info["height"],
+            "mode": "edit",
+        }
+
+    # ======================== 风格迁移 ========================
+
+    async def generate_style_transfer(
+        self,
+        image_base64: str,
+        style_tags: List[str],
+        strength: str = "medium",
+        aspect_ratio: str = "3:4",
+    ) -> Dict[str, Any]:
+        """
+        风格迁移 — 将原始图片转换为目标风格
+
+        Args:
+            image_base64: 原始图片的 base64 编码数据
+            style_tags: 目标风格标签名称列表
+            strength: 迁移强度 (light/medium/strong)
+            aspect_ratio: 输出比例
+
+        Returns:
+            包含图片 URL 和元信息的字典
+        """
+        # 构建风格迁移提示词
+        enhanced_prompt = self._build_style_transfer_prompt(
+            style_tags, strength, aspect_ratio
+        )
+        ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
+
+        style_names = ", ".join(style_tags)
+        print(f"[PosterService] 风格迁移: {style_names} | 强度={strength}")
+        image_result_base64 = await self._call_ai_image_api(
+            enhanced_prompt, input_image_base64=image_base64
+        )
+
+        if not image_result_base64:
+            return {
+                "success": False,
+                "error": "AI 风格迁移失败，请稍后重试",
+                "prompt_used": enhanced_prompt,
+            }
+
+        image_url = self._save_image(image_result_base64, prefix="poster_style")
+
+        return {
+            "success": True,
+            "image_url": image_url,
+            "prompt_used": enhanced_prompt,
+            "aspect_ratio": aspect_ratio,
+            "width": ratio_info["width"],
+            "height": ratio_info["height"],
+            "mode": "style_transfer",
+            "style_tags": style_tags,
+            "strength": strength,
+        }
+
+    # ======================== 局部重绘 (Inpaint) ========================
+
+    async def generate_inpaint(
+        self,
+        image_base64: str,
+        mask_base64: str,
+        inpaint_prompt: str,
+        aspect_ratio: str = "3:4",
+    ) -> Dict[str, Any]:
+        """
+        局部重绘 — 根据遮罩区域和文字提示替换指定区域内容
+
+        Args:
+            image_base64: 原始图片 base64
+            mask_base64: 遮罩图片 base64（白色区域 = 需要重绘）
+            inpaint_prompt: 重绘提示词（如 "一只金毛犬"）
+            aspect_ratio: 输出比例
+
+        Returns:
+            包含图片 URL 和元信息的字典
+        """
+        try:
+            enhanced_prompt = self._build_inpaint_prompt(inpaint_prompt, aspect_ratio)
+
+            image_result = await self._call_ai_image_api(
+                enhanced_prompt,
+                input_image_base64=image_base64,
+                mask_image_base64=mask_base64,
+            )
+
+            if not image_result:
+                return {"success": False, "error": "AI 局部重绘失败，未返回图片数据"}
+
+            image_url = self._save_image(image_result, prefix="poster_inpaint")
+
+            return {
+                "success": True,
+                "image_url": image_url,
+                "mode": "inpaint",
+                "aspect_ratio": aspect_ratio,
+                "ai_prompt": enhanced_prompt,
+            }
+
+        except Exception as e:
+            print(f"[PosterService] 局部重绘异常: {e}")
+            return {"success": False, "error": f"局部重绘失败: {str(e)}"}
+
+    async def generate_erase(
+        self,
+        image_base64: str,
+        mask_base64: str,
+    ) -> Dict[str, Any]:
+        """
+        智能擦除 — 擦除遮罩区域的内容并自动补全背景
+
+        Args:
+            image_base64: 原始图片 base64
+            mask_base64: 遮罩图片 base64（白色区域 = 需要擦除）
+
+        Returns:
+            包含图片 URL 和元信息的字典
+        """
+        try:
+            erase_prompt = self._build_erase_prompt()
+
+            image_result = await self._call_ai_image_api(
+                erase_prompt,
+                input_image_base64=image_base64,
+                mask_image_base64=mask_base64,
+            )
+
+            if not image_result:
+                return {"success": False, "error": "AI 智能擦除失败，未返回图片数据"}
+
+            image_url = self._save_image(image_result, prefix="poster_erase")
+
+            return {
+                "success": True,
+                "image_url": image_url,
+                "mode": "erase",
+                "ai_prompt": erase_prompt,
+            }
+
+        except Exception as e:
+            print(f"[PosterService] 智能擦除异常: {e}")
+            return {"success": False, "error": f"智能擦除失败: {str(e)}"}
+
+    # ======================== 多尺寸适配 (Adapt / Outpaint) ========================
+
+    async def generate_adapt(
+        self,
+        image_base64: str,
+        source_ratio: str,
+        target_ratio: str,
+        strategy: str = "outpaint",
+        outpaint_prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        将图片从源比例适配到目标比例
+
+        Args:
+            image_base64: 原始图片 base64
+            source_ratio: 源图当前比例 (如 "3:4")
+            target_ratio: 目标比例 (如 "16:9")
+            strategy: 适配策略 "crop"(智能裁剪) 或 "outpaint"(AI 扩图)
+            outpaint_prompt: AI 扩图时的补充提示词（可选）
+
+        Returns:
+            包含图片 URL 和元信息的字典
+        """
+        if target_ratio not in ASPECT_RATIOS:
+            return {"success": False, "error": f"不支持的目标比例: {target_ratio}"}
+
+        try:
+            # 根据策略构建不同的提示词
+            if strategy == "crop":
+                prompt = self._build_crop_prompt(source_ratio, target_ratio)
+            else:
+                prompt = self._build_outpaint_prompt(
+                    source_ratio, target_ratio, outpaint_prompt
+                )
+
+            # 调用 AI API（传入原图）
+            image_result = await self._call_ai_image_api(
+                prompt, input_image_base64=image_base64
+            )
+
+            if not image_result:
+                return {"success": False, "error": "AI 尺寸适配失败，未返回图片数据"}
+
+            image_url = self._save_image(image_result, prefix=f"poster_adapt_{strategy}")
+            target_info = ASPECT_RATIOS[target_ratio]
+
+            return {
+                "success": True,
+                "image_url": image_url,
+                "mode": "adapt",
+                "aspect_ratio": target_ratio,
+                "width": target_info["width"],
+                "height": target_info["height"],
+                "ai_prompt": prompt,
+            }
+
+        except Exception as e:
+            print(f"[PosterService] 尺寸适配异常: {e}")
+            return {"success": False, "error": f"尺寸适配失败: {str(e)}"}
+
+    async def generate_export_all(
+        self,
+        image_base64: str,
+        source_ratio: str,
+        strategy: str = "outpaint",
+        outpaint_prompt: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        全平台一键导出 — 并发适配为所有不同于源比例的目标尺寸
+
+        Args:
+            image_base64: 原始图片 base64
+            source_ratio: 源图当前比例
+            strategy: 适配策略
+            outpaint_prompt: AI 扩图时的补充提示词
+
+        Returns:
+            包含多张图片的结果字典
+        """
+        # 筛出与源比例不同的目标
+        target_ratios = [r for r in ASPECT_RATIOS if r != source_ratio]
+
+        if not target_ratios:
+            return {"success": False, "error": "没有需要适配的目标比例"}
+
+        # 使用信号量限制并发（避免 API 限速）
+        semaphore = asyncio.Semaphore(2)
+
+        async def adapt_one(ratio: str) -> Dict[str, Any]:
+            async with semaphore:
+                return await self.generate_adapt(
+                    image_base64=image_base64,
+                    source_ratio=source_ratio,
+                    target_ratio=ratio,
+                    strategy=strategy,
+                    outpaint_prompt=outpaint_prompt,
+                )
+
+        # 并发执行所有适配任务
+        results = await asyncio.gather(
+            *[adapt_one(r) for r in target_ratios],
+            return_exceptions=True,
+        )
+
+        images = []
+        errors = []
+        for ratio, res in zip(target_ratios, results):
+            if isinstance(res, Exception):
+                errors.append(f"{ratio}: {str(res)}")
+            elif res.get("success"):
+                images.append({
+                    "url": res["image_url"],
+                    "ratio": ratio,
+                    "width": res.get("width"),
+                    "height": res.get("height"),
+                })
+            else:
+                errors.append(f"{ratio}: {res.get('error', '未知错误')}")
+
+        return {
+            "success": len(images) > 0,
+            "mode": "export_all",
+            "images": images,
+            "total": len(images),
+            "errors": errors if errors else None,
+        }
+
+    # ======================== 内部方法 ========================
+
+    def _build_edit_prompt(self, edit_prompt: str, aspect_ratio: str) -> str:
+        """构建以图改图的增强提示词"""
+        ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
+        return (
+            f"请根据以下指令编辑这张图片：\n{edit_prompt}\n\n"
+            f"【要求】\n"
+            f"- 保留图片的主要元素和构图\n"
+            f"- 按照指令准确修改对应部分\n"
+            f"- 输出比例: {aspect_ratio}（{ratio_info['label']}）\n"
+            f"- 保持高质量和自然的编辑效果"
+        )
+
+    def _build_style_transfer_prompt(
+        self, style_tags: List[str], strength: str, aspect_ratio: str
+    ) -> str:
+        """构建风格迁移的增强提示词"""
+        # 获取风格描述
+        style_snippets = []
+        for tag_name in style_tags:
+            tag = self.get_style_tag_by_name(tag_name)
+            if tag:
+                style_snippets.append(tag["prompt_snippet"])
+
+        style_desc = ", ".join(style_snippets) if style_snippets else ", ".join(style_tags)
+
+        # 强度映射
+        strength_map = {
+            "light": "轻微调整画面风格，保留大部分原始细节和色调",
+            "medium": "明显转换画面风格，保留主要构图和内容",
+            "strong": "大幅度转换画面风格，可以大胆改变色调和氛围",
+        }
+        strength_desc = strength_map.get(strength, strength_map["medium"])
+
+        ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
+
+        return (
+            f"请将这张图片转换为以下风格：\n{style_desc}\n\n"
+            f"【迁移强度】\n{strength_desc}\n\n"
+            f"【要求】\n"
+            f"- 保持原始图片的主体内容和构图\n"
+            f"- 将整体视觉风格转变为目标风格\n"
+            f"- 调整色调、光影、质感以匹配目标风格\n"
+            f"- 输出比例: {aspect_ratio}（{ratio_info['label']}）\n"
+            f"- 确保输出高质量、和谐自然的画面"
+        )
+
+    def _build_custom_prompt(
+        self,
+        user_prompt: str,
+        style_tags: Optional[List[str]] = None,
+        aspect_ratio: str = "3:4",
+        color_tone: Optional[str] = None,
+        brand_kit: Optional[Any] = None,
+    ) -> str:
+        """
+        构建自定义生成的增强提示词
+        将用户原始提示词与风格、尺寸、品牌等约束合并
+        """
+        parts = []
+
+        # 核心内容
+        parts.append(f"请根据以下描述生成一张高质量海报/封面图片：\n{user_prompt}")
+
+        # 添加风格标签
+        if style_tags:
+            style_snippets = []
+            for tag_name in style_tags:
+                tag = self.get_style_tag_by_name(tag_name)
+                if tag:
+                    style_snippets.append(tag["prompt_snippet"])
+            if style_snippets:
+                parts.append(f"\n【风格要求】\n{', '.join(style_snippets)}")
+
+        # 色调偏好
+        if color_tone:
+            parts.append(f"\n【色调偏好】\n{color_tone}")
+
+        # 尺寸约束
+        ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
+        parts.append(
+            f"\n【构图要求】\n"
+            f"- 图片比例: {aspect_ratio}（{ratio_info['label']}平台适用）\n"
+            f"- 画面精致、构图大气、色彩和谐\n"
+            f"- 适合作为社交媒体封面/海报使用"
+        )
+
+        prompt = "\n".join(parts)
+
+        # 品牌注入
+        if brand_kit:
+            prompt = self._inject_brand(prompt, brand_kit)
+
+        return prompt
+
+    def _inject_brand(self, prompt: str, brand_kit: Any) -> str:
+        """
+        将品牌包信息注入到 AI 提示词中。
+        brand_kit 可以是 BrandKit 模型实例或字典。
+        """
+        parts = []
+
+        # 兼容模型实例和字典
+        def _get(key):
+            if isinstance(brand_kit, dict):
+                return brand_kit.get(key)
+            return getattr(brand_kit, key, None)
+
+        colors = _get("colors")
+        if colors and isinstance(colors, list) and len(colors) > 0:
+            parts.append(f"使用品牌配色方案: {', '.join(colors)}")
+
+        tone_prompt = _get("tone_prompt")
+        if tone_prompt:
+            parts.append(f"设计调性: {tone_prompt}")
+
+        tone = _get("tone")
+        if tone and not tone_prompt:
+            parts.append(f"整体调性: {tone}")
+
+        font_style = _get("font_style")
+        if font_style:
+            parts.append(f"字体风格偏好: {font_style}")
+
+        banned_words = _get("banned_words")
+        if banned_words and isinstance(banned_words, list) and len(banned_words) > 0:
+            parts.append(f"画面中不要出现以下元素或文字: {', '.join(banned_words)}")
+
+        if parts:
+            prompt += "\n\n【品牌规范】\n" + "\n".join(parts)
+
+        return prompt
+
+    def _build_inpaint_prompt(self, inpaint_prompt: str, aspect_ratio: str = "3:4") -> str:
+        """构建局部重绘的增强提示词"""
+        ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
+        return (
+            f"请对图片中白色遮罩标记的区域进行内容替换。\n"
+            f"保持遮罩区域之外的内容完全不变。\n"
+            f"将遮罩区域替换为: {inpaint_prompt}\n"
+            f"替换后的内容应与周围环境自然融合，保持光影和色调一致。\n"
+            f"输出尺寸参考: {ratio_info['width']}x{ratio_info['height']} ({ratio_info['label']})"
+        )
+
+    def _build_erase_prompt(self) -> str:
+        """构建智能擦除的增强提示词"""
+        return (
+            "请移除图片中白色遮罩标记区域内的所有物体和内容。\n"
+            "使用周围的背景、纹理和色彩自然地填补被移除的区域。\n"
+            "确保填补后的区域与周围环境无缝衔接，看不出擦除痕迹。\n"
+            "保持遮罩区域之外的所有内容完全不变。"
+        )
+
+    def _build_crop_prompt(self, source_ratio: str, target_ratio: str) -> str:
+        """构建智能裁剪的提示词"""
+        source_info = ASPECT_RATIOS.get(source_ratio, ASPECT_RATIOS["3:4"])
+        target_info = ASPECT_RATIOS.get(target_ratio, ASPECT_RATIOS["3:4"])
+        return (
+            f"请将这张图片从 {source_ratio} ({source_info['label']}) 比例 "
+            f"裁剪适配为 {target_ratio} ({target_info['label']}) 比例。\n"
+            f"目标尺寸: {target_info['width']}x{target_info['height']}\n\n"
+            f"【裁剪要求】\n"
+            f"- 智能识别画面主体，确保主要内容保留在画面中心\n"
+            f"- 裁去多余的边缘区域\n"
+            f"- 保持图片质量不变，不要拉伸或压缩\n"
+            f"- 如有必要可以微调构图使画面更美观\n"
+            f"- 不要添加任何新的内容"
+        )
+
+    def _build_outpaint_prompt(
+        self,
+        source_ratio: str,
+        target_ratio: str,
+        outpaint_prompt: Optional[str] = None,
+    ) -> str:
+        """构建 AI 扩图 (Outpaint) 的提示词"""
+        source_info = ASPECT_RATIOS.get(source_ratio, ASPECT_RATIOS["3:4"])
+        target_info = ASPECT_RATIOS.get(target_ratio, ASPECT_RATIOS["3:4"])
+
+        base = (
+            f"请将这张图片从 {source_ratio} ({source_info['label']}) 比例 "
+            f"扩展适配为 {target_ratio} ({target_info['label']}) 比例。\n"
+            f"目标尺寸: {target_info['width']}x{target_info['height']}\n\n"
+            f"【扩图要求】\n"
+            f"- 完整保留原图的所有内容，不能裁剪或缩放\n"
+            f"- 沿需要扩展的方向（上下或左右）生成新的画面内容\n"
+            f"- 扩展的内容应与原图风格、色调、光影完全一致\n"
+            f"- 确保扩展区域与原图无缝衔接\n"
+            f"- 生成的新内容应自然合理，符合原图的场景逻辑"
+        )
+
+        if outpaint_prompt:
+            base += f"\n- 扩展区域的内容参考提示: {outpaint_prompt}"
+
+        return base
+
+    async def _call_ai_image_api(
+        self, prompt: str,
+        input_image_base64: Optional[str] = None,
+        mask_image_base64: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        调用 Gemini 图片生成/编辑 API
+
+        Args:
+            prompt: 文本提示词
+            input_image_base64: 可选，输入图片的 base64 数据（用于以图改图/风格迁移）
+            mask_image_base64: 可选，遮罩图片的 base64 数据（用于局部重绘/擦除）
+
+        Returns:
+            base64 编码的结果图片数据，失败返回 None
+        """
+        url = f"{self.base_url}/v1beta/models/{self.model}:generateContent"
+
+        # 构建 parts：先图片后文本（Gemini 推荐顺序）
+        parts = []
+        if input_image_base64:
+            parts.append({
+                "inlineData": {
+                    "mimeType": "image/png",
+                    "data": input_image_base64,
+                }
+            })
+        # 局部重绘/擦除时追加 Mask 图片
+        if mask_image_base64:
+            parts.append({
+                "inlineData": {
+                    "mimeType": "image/png",
+                    "data": mask_image_base64,
+                }
+            })
+        parts.append({"text": prompt})
+
+        payload = {
+            "contents": [{"parts": parts}],
+            "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+        }
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {self.api_key}",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                result = response.json()
+
+                # 从响应中提取图片数据
+                if "candidates" in result and result["candidates"]:
+                    for part in result["candidates"][0]["content"]["parts"]:
+                        if "inlineData" in part:
+                            return part["inlineData"]["data"]
+
+                print("[PosterService] API 响应中未找到图片数据")
+                return None
+
+        except httpx.HTTPStatusError as e:
+            print(f"[PosterService] HTTP 错误: {e.response.status_code}")
+            return None
+        except Exception as e:
+            print(f"[PosterService] 请求异常: {e}")
+            return None
+
+    def _save_image(self, image_base64: str, prefix: str = "poster") -> str:
+        """保存 base64 图片到本地，返回访问路径"""
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        unique_id = str(uuid.uuid4())[:8]
+        filename = f"{prefix}_{timestamp}_{unique_id}.png"
+
+        file_path = self.output_dir / filename
+        with open(file_path, "wb") as f:
+            f.write(base64.b64decode(image_base64))
+
+        print(f"[PosterService] 图片已保存: {file_path}")
+        return f"/static/images/posters/{filename}"
+
+
+# ======================== 单例实例 ========================
+poster_service = PosterService()

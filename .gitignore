@@ -92,3 +92,20 @@ Desktop.ini
 *.db
 *.sqlite
 *.sqlite3
+
+# ===================
+# AI Agents & Assistants
+# ===================
+.agent/
+.agents/
+_agent/
+_agents/
+.gemini/
+.cursor/
+.cursorrules
+
+# ===================
+# 项目生成资源 (运行时目录)
+# ===================
+static/images/posters/
+static/downloads/

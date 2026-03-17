@@ -1,0 +1,156 @@
+<template>
+  <div class="bg-slate-50 min-h-screen flex items-center justify-center p-4 relative z-0">
+    <!-- Background Decorative Elements -->
+    <div class="fixed top-0 left-0 -z-10 w-full h-full overflow-hidden pointer-events-none opacity-40">
+      <div class="absolute -top-[10%] -left-[10%] w-[40%] h-[40%] bg-blue-600/10 blur-[120px] rounded-full"></div>
+      <div class="absolute -bottom-[10%] -right-[10%] w-[40%] h-[40%] bg-blue-600/5 blur-[120px] rounded-full"></div>
+    </div>
+
+    <div class="w-full max-w-[440px] flex flex-col items-center">
+      <!-- Logo Section -->
+      <div class="flex items-center gap-3 mb-8">
+        <div class="w-12 h-12 flex items-center justify-center shrink-0">
+          <img src="/logo.png" alt="Logo" class="w-full h-full object-contain" />
+        </div>
+        <h1 class="text-2xl font-bold tracking-tight text-slate-900">内容运营助手</h1>
+      </div>
+
+      <!-- Login Card -->
+      <div class="w-full bg-white rounded-xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8">
+        <div class="mb-8">
+          <h2 class="text-2xl font-bold text-slate-900">{{ isLoginMode ? '欢迎回来' : '注册新账号' }}</h2>
+          <p class="text-slate-500 mt-2">
+            {{ isLoginMode ? '请登录您的账号以继续管理内容' : '创建一个账号开启智能运营体验' }}
+          </p>
+        </div>
+
+        <form class="space-y-5" @submit.prevent="handleAuth">
+          <!-- Username Input -->
+          <div class="flex flex-col gap-2">
+            <label class="text-sm font-semibold text-slate-700" for="username">用户名</label>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">👤</span>
+              <input 
+                id="username"
+                v-model="authForm.username" 
+                type="text" 
+                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 focus:bg-white outline-none transition-all text-slate-900 placeholder:text-slate-400"
+                placeholder="在此输入用户名"
+                required 
+                minlength="3"
+              />
+            </div>
+          </div>
+
+          <!-- Password Input -->
+          <div class="flex flex-col gap-2">
+            <div class="flex justify-between items-center">
+              <label class="text-sm font-semibold text-slate-700" for="password">密码</label>
+              <a v-if="isLoginMode" class="text-sm font-medium text-blue-600 hover:underline cursor-pointer">忘记密码？</a>
+            </div>
+            <div class="relative">
+              <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔒</span>
+              <input 
+                id="password"
+                v-model="authForm.password" 
+                type="password" 
+                class="w-full pl-10 pr-4 py-3 bg-slate-50 border border-slate-200 rounded-xl focus:ring-2 focus:ring-blue-600/20 focus:border-blue-600 focus:bg-white outline-none transition-all text-slate-900 placeholder:text-slate-400"
+                placeholder="输入您的密码"
+                required 
+                minlength="6"
+              />
+            </div>
+          </div>
+
+          <!-- Error Alert -->
+          <div v-if="authError" class="p-3 bg-red-50 border border-red-200 rounded-xl text-red-600 text-sm font-medium">
+            ⚠️ {{ authError }}
+          </div>
+
+          <!-- Submit Button -->
+          <button 
+            type="submit" 
+            class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed mt-2"
+            :disabled="authLoading"
+          >
+            <span>{{ authLoading ? '处理中...' : (isLoginMode ? '立即登录' : '同意协议并注册') }}</span>
+            <span v-if="!authLoading" class="group-hover:translate-x-1 transition-transform">→</span>
+          </button>
+        </form>
+        
+        <!-- Social Login Divider -->
+        <div class="relative my-8" v-if="isLoginMode">
+          <div class="absolute inset-0 flex items-center">
+            <div class="w-full border-t border-slate-200"></div>
+          </div>
+          <div class="relative flex justify-center text-sm">
+            <span class="px-4 bg-white text-slate-400">免密登录体验版</span>
+          </div>
+        </div>
+        
+        <!-- Action Buttons -->
+        <div class="grid grid-cols-2 gap-4" v-if="isLoginMode">
+          <button @click="fillTestAccount('newuser', 'test123')" class="flex items-center justify-center gap-2 py-2.5 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors text-sm font-medium text-slate-700">
+            <span class="text-emerald-500">✅</span> 新手体验
+          </button>
+          <button @click="fillTestAccount('zhangsan', 'test123')" class="flex items-center justify-center gap-2 py-2.5 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors text-sm font-medium text-slate-700">
+            <span class="text-blue-500">👨‍💻</span> 开发者账户
+          </button>
+        </div>
+
+      </div>
+
+      <!-- Footer Link -->
+      <p class="mt-8 text-slate-600 text-sm">
+        {{ isLoginMode ? '还没有账号？' : '已有账号？' }}
+        <a class="text-blue-600 font-bold hover:underline ml-1 cursor-pointer" @click.prevent="isLoginMode = !isLoginMode">
+          {{ isLoginMode ? '立即注册' : '返回登录' }}
+        </a>
+      </p>
+    </div>
+  </div>
+</template>
+
+<script setup>
+import { ref } from 'vue'
+import { login, register, getCurrentUser } from '../../api.js'
+
+const emit = defineEmits(['login-success'])
+
+const isLoginMode = ref(true)
+const authLoading = ref(false)
+const authError = ref('')
+const authForm = ref({
+  username: '',
+  password: ''
+})
+
+async function handleAuth() {
+  authError.value = ''
+  authLoading.value = true
+  
+  try {
+    if (isLoginMode.value) {
+      // 登录
+      await login(authForm.value.username, authForm.value.password)
+    } else {
+      // 注册
+      await register(authForm.value.username, authForm.value.password)
+      // 注册成功后自动登录
+      await login(authForm.value.username, authForm.value.password)
+    }
+    const user = await getCurrentUser()
+    emit('login-success', user.username)
+  } catch (e) {
+    authError.value = e.response?.data?.detail || e.message || '操作失败'
+  } finally {
+    authLoading.value = false
+  }
+}
+
+function fillTestAccount(username, password) {
+  authForm.value.username = username;
+  authForm.value.password = password;
+  handleAuth();
+}
+</script>
