@@ -87,7 +87,6 @@ start.bat
 
 ```bash
 # 确保 PostgreSQL 运行，创建数据库
-psql -U postgres -c "CREATE DATABASE aicontent;"
 psql -U postgres -c "CREATE DATABASE langgraph_db;"
 ```
 
