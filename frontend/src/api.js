@@ -798,6 +798,70 @@ export async function generateCalendarPlan(data) {
   return response.data
 }
 
+// ============== 视频生成 API ==============
+
+/**
+ * 提交视频生成任务
+ * @param {Object} data - { topic, voice_type, style? }
+ */
+export async function generateVideo(data) {
+  const response = await api.post('/video/generate', data)
+  return response.data
+}
+
+/**
+ * 获取历史视频列表
+ * @param {number} limit 
+ */
+export async function getVideoList(limit = 20) {
+  const response = await api.get('/video/list', { params: { limit } })
+  return response.data
+}
+
+/**
+ * 查询视频生成进度状态
+ * @param {string} taskId 
+ */
+export async function getVideoStatus(taskId) {
+  const response = await api.get(`/video/status/${taskId}`)
+  return response.data
+}
+
+/**
+ * 预览生成的视频脚本 (不直接生成最终成片)
+ * @param {Object} data - { topic, style? }
+ */
+export async function previewVideoScript(data) {
+  const response = await api.post('/video/script/preview', data)
+  return response.data
+}
+
+/**
+ * 拼装视频下载链接
+ * @param {string} taskId 
+ */
+export function getVideoDownloadUrl(taskId) {
+  return `${API_BASE}/api/v1/video/download/${taskId}`
+}
+
+/**
+ * 获取可用音色列表 (火山引擎预置音色)
+ */
+export async function getVoiceOptions() {
+  const response = await api.get('/video/voices')
+  return response.data
+}
+
+/**
+ * 删除视频生成任务
+ * @param {string} taskId 
+ */
+export async function deleteVideoTask(taskId) {
+  const response = await api.delete(`/video/${taskId}`)
+  return response.data
+}
+
+
 // 获取排期计划列表
 export async function getCalendarPlans() {
   const response = await api.get('/calendar/plans')

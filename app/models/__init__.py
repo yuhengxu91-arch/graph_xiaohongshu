@@ -6,6 +6,7 @@ from app.models.poster import PosterGeneration, PosterTemplate, StyleTag
 from app.models.batch_task import BatchTask, BatchTaskItem
 from app.models.platform_variant import PlatformVariant
 from app.models.calendar import CalendarPlan, CalendarEvent
+from app.models.video_task import VideoTask
 
 __all__ = [
     "User",
@@ -17,5 +18,6 @@ __all__ = [
     "PlatformVariant",
     "CalendarPlan",
     "CalendarEvent",
+    "VideoTask",
 ]
 

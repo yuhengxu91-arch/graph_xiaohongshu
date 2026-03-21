@@ -111,8 +111,14 @@ class LLMService:
         self._llm = None
         self._llm_fast = None
         self._llm_extract = None
+        self._llm_deepseek = None
         
-        print(f"[LLM] 模型配置: 标准={self.model}, 快速={self.model_fast}")
+        # DeepSeek 配置（独立 key/url）
+        self.deepseek_api_key = os.getenv("DEEPSEEK_API_KEY", "")
+        self.deepseek_base_url = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+        self.deepseek_model = os.getenv("DEEPSEEK_MODEL", "deepseek-chat")
+        
+        print(f"[LLM] 模型配置: 标准={self.model}, 快速={self.model_fast}, DeepSeek={self.deepseek_model}")
     
     def _get_callbacks(self) -> List:
         """获取回调列表"""
@@ -153,6 +159,20 @@ class LLMService:
         if self._llm_extract is None:
             self._llm_extract = self._create_llm(self.model_fast, self.temperature_extract)
         return self._llm_extract
+    
+    @property
+    def llm_deepseek(self) -> ChatOpenAI:
+        """DeepSeek LLM（视频脚本专用，更强的中文创作能力）"""
+        if self._llm_deepseek is None:
+            callbacks = self._get_callbacks()
+            self._llm_deepseek = ChatOpenAI(
+                model=self.deepseek_model,
+                temperature=0.8,
+                api_key=self.deepseek_api_key,
+                base_url=self.deepseek_base_url,
+                callbacks=callbacks if callbacks else None,
+            )
+        return self._llm_deepseek
     
     def _extract_usage_info(self, response, model: str = "") -> LLMUsageInfo:
         """从 LLM 响应中提取 token 使用信息"""

@@ -11,6 +11,7 @@ const MainApp = () => import('./MainApp.vue')
 const WorkflowPage = () => import('./WorkflowPage.vue')
 const CalendarPage = () => import('./CalendarPage.vue')
 const PosterPage = () => import('./PosterPage.vue')
+const VideoPage = () => import('./VideoPage.vue')
 const GalleryPage = () => import('./GalleryPage.vue')
 const BrandPage = () => import('./BrandPage.vue')
 const TemplateCenterPage = () => import('./TemplateCenterPage.vue')
@@ -40,6 +41,11 @@ const routes = [
         path: 'poster',
         name: 'poster',
         component: PosterPage
+      },
+      {
+        path: 'video',
+        name: 'video',
+        component: VideoPage
       },
       {
         path: 'gallery',

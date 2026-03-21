@@ -51,6 +51,15 @@ class Settings(BaseSettings):
     jwt_algorithm: str = "HS256"
     jwt_expire_minutes: int = 1440  # 24小时
     
+    # ============== 火山引擎 TTS 配置 ==============
+    tts_app_id: str = ""
+    tts_access_token: str = ""
+    tts_voice_type: str = "zh_female_cancan_mars"
+    tts_api_url: str = "https://openspeech.bytedance.com/api/v1/tts"
+    
+    # ============== Remotion 渲染服务 ==============
+    remotion_service_url: str = "http://localhost:3100"
+    
     @property
     def async_database_url(self) -> str:
         """获取异步数据库 URL"""

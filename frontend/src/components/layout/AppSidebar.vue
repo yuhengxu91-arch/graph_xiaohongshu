@@ -106,6 +106,7 @@ const emit = defineEmits(['update:modelValue', 'update:activePage', 'new-workflo
 const mainNavItems = [
   { name: '内容工作流', icon: '⚡️', path: 'workflow' },
   { name: '海报生成', icon: '🎨', path: 'poster' },
+  { name: '干货视频', icon: '🎬', path: 'video' },
   { name: '多平台适配', icon: '🌐', path: 'platform' },
   { name: '智能排期', icon: '📅', path: 'calendar' },
 ]
