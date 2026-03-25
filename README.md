@@ -256,3 +256,36 @@ graph_xiaohongshu/
 ## 📄 License
 
 MIT
+
+---
+
+## 数据库迁移（pg_dump）
+
+适用于可停机的逻辑迁移，命令以 Windows PowerShell 为例。
+
+1. A 机器导出
+```powershell
+New-Item -ItemType Directory -Path C:\temp -Force
+pg_dump -F c -h <A_HOST> -U postgres -d langgraph_db -f "C:\temp\langgraph_db.dump"
+```
+
+2. 传输到 B 机器（scp / WinSCP / 共享盘任选其一）
+
+3. B 机器建库（已存在可跳过）
+```bash
+createdb -h <B_HOST> -U postgres langgraph_db
+```
+
+4. B 机器导入
+```bash
+pg_restore -h <B_HOST> -U postgres -d langgraph_db -v /path/to/langgraph_db.dump
+```
+
+可选：覆盖已有对象
+```bash
+pg_restore -h <B_HOST> -U postgres -d langgraph_db --clean --if-exists -v /path/to/langgraph_db.dump
+```
+
+注意：
+- `pg_dump/pg_restore` 版本尽量与源库一致，目标库版本不低于源库
+- 若需迁移角色/权限：`pg_dumpall --globals-only > globals.sql`，再在 B 机器执行 `psql -f globals.sql`
