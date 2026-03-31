@@ -255,6 +255,10 @@ class VideoService:
                 "keyPoints": scene.get("key_points", []),
                 "codeExample": scene.get("code_example", ""),
                 "sceneType": scene.get("type", "content"),
+                # V3 动态结构透传
+                "layoutType": scene.get("layoutType", "TitleCard"),
+                "themeColor": scene.get("themeColor", "#818cf8"),
+                "content": scene.get("content", {}),
             })
         return remotion_scenes
 

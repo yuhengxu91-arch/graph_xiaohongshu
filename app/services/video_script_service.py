@@ -11,11 +11,11 @@ from app.services.llm_service import llm_service
 from app.services.tavily_service import tavily_service
 
 
-# ============== 干货技能卡 Prompt ==============
-KNOWLEDGE_SCRIPT_PROMPT = """你是一位顶级短视频编剧，专精知识干货类短视频。你的脚本必须像「刷到就停不下来」的抖音爆款。
+# ============== 干货技能卡 Prompt (Data-Driven UI V3) ==============
+KNOWLEDGE_SCRIPT_PROMPT = """你是一位顶级短视频编剧，也是一位结构化 UI 设计师。你的任务是将复杂的内容转化为极简的“组件抽认卡”演示流。
 
 ## 任务
-根据主题，生成一个 60~90 秒的干货短视频脚本。
+根据主题，生成一个 60~90 秒的干货段视频脚本，包含具体的界面排版指令（组件驱动）。
 
 {search_context}
 
@@ -24,68 +24,56 @@ KNOWLEDGE_SCRIPT_PROMPT = """你是一位顶级短视频编剧，专精知识干
 
 ```json
 {{
-  "title": "视频标题（15字以内，数字+痛点+利益点，如'3个技巧省下10万广告费'）",
+  "themeColor": "HEX色值 (如 #818cf8、#34d399，代表本视频的主题点缀色)",
+  "title": "视频主标题",
   "scenes": [
     {{
-      "scene_index": 0,
-      "type": "intro",
-      "narration": "开场旁白（必须以反问、数字或反直觉的事实开头，制造'不看后悔'的感觉）",
-      "scene_title": "开场大字（8字以内，直击痛点）",
-      "key_points": [],
-      "duration_hint": 5
+      "layoutType": "TitleCard",
+      "narration": "开场旁白语音（制造悬念和痛点，必看理由）",
+      "audioDuration": 5,
+      "themeColor": "此场景的主题色（可以继承外层）",
+      "content": {{
+        "headline": "屏幕中央巨大粗体标题（极简，不超过8字）",
+        "subhead": "副标题修饰（全大写英文字母或简短标语）"
+      }}
     }},
     {{
-      "scene_index": 1,
-      "type": "content",
-      "narration": "第一个知识点的口播（口语化，像给好朋友安利，不要书面语）",
-      "scene_title": "技巧一的标题（6字以内）",
-      "key_points": [
-        "第一条说明（8字以内，用动词开头）",
-        "第二条说明",
-        "第三条说明",
-        "第四条说明"
-      ],
-      "code_example": "副描述（用具体数字，如'提升 300% 效率 · 一行代码搞定'）",
-      "duration_hint": 15
+      "layoutType": "SplitScreen",
+      "narration": "第一段口语化解说旁白",
+      "audioDuration": 8,
+      "themeColor": "此场景的主色",
+      "content": {{
+        "title": "分屏右侧的段落标题",
+        "keywords": ["关键词1", "关键词2", "关键词3"]
+      }}
     }},
     {{
-      "scene_index": 2,
-      "type": "content",
-      "narration": "第二个知识点...",
-      "scene_title": "技巧二标题",
-      "key_points": ["...", "...", "...", "..."],
-      "code_example": "副描述...",
-      "duration_hint": 15
+      "layoutType": "BulletPointsCard",
+      "narration": "第二段口语化解说...",
+      "audioDuration": 8,
+      "content": {{
+        "title": "要点总结标题",
+        "points": ["核心要点一（短句）", "核心要点二", "核心要点三"]
+      }}
     }},
     {{
-      "scene_index": 3,
-      "type": "content",
-      "narration": "第三个知识点...",
-      "scene_title": "技巧三标题",
-      "key_points": ["...", "...", "...", "..."],
-      "code_example": "副描述...",
-      "duration_hint": 15
-    }},
-    {{
-      "scene_index": 4,
-      "type": "outro",
-      "narration": "结尾金句+引导关注（不超过2句，最后一句必须是行动号召）",
-      "scene_title": "结尾标题",
-      "key_points": [],
-      "duration_hint": 5
+      "layoutType": "TitleCard",
+      "narration": "结尾号召动作（点赞关注等）",
+      "audioDuration": 4,
+      "content": {{
+        "headline": "行动号召极简大字",
+        "subhead": "SUBSCRIBE"
+      }}
     }}
-  ],
-  "total_duration_hint": 55
+  ]
 }}
 ```
 
 ## 爆款脚本法则
-1. **开场3秒定生死**：用反直觉、数字冲击或痛点共鸣开头（如"90%的人不知道，Excel这个按钮能省2小时"）
-2. **narration 是核心**：这是 TTS 会朗读出来的内容，必须口语化、有节奏、像朋友聊天
-3. **key_points 精炼有力**：每条5-8字，用动词开头（如"消除重复代码"、"提升3倍查询速度"）
-4. **scene_title 吸睛**：大字标题6字以内，技术类可用英文关键词
-5. **节奏紧凑**：3个核心要点，总时长55~75秒，每段15秒左右
-6. **用真实数据**：如果有搜索到的参考资料，务必引用具体数据让内容更有说服力"""
+1. **开场3秒定生死**：大字报(TitleCard) 必须直击痛点。
+2. **场景布局组合**：建议组合套路是 `TitleCard` (开场) -> `SplitScreen` (概念) -> `BulletPointsCard` (干货归纳) -> `TitleCard` (结尾)。
+3. **narration 是核心**：机器朗读用，口语化、像朋友聊天，结合真实数据。
+4. **组件参数极简**：不要啰嗦，标题和要点全部短平快。"""
 
 
 # ============== 数据可视化 Prompt ==============

@@ -1,3 +1,4 @@
+import "./style.css";
 import { Composition, registerRoot } from "remotion";
 import { KnowledgeVideo, type KnowledgeVideoProps } from "./compositions/KnowledgeVideo";
 import { DataVizVideo, type DataVizVideoProps } from "./compositions/DataVizVideo";
@@ -27,15 +28,37 @@ const RemotionRoot: React.FC = () => {
           title: "示例视频标题",
           scenes: [
             {
-              narration: "这是一段示例旁白文本。",
+              narration: "今天我们将告别枯燥的干文字，迎来真正的数据驱动 UI 组件。",
               audioUrl: "",
               audioDuration: 5,
-              imageUrl: "",
-              sceneTitle: "示例标题",
-              keyPoints: ["要点一", "要点二", "要点三", "要点四"],
-              codeExample: "4 个要点 · 干货满满",
-              sceneType: "content",
+              layoutType: "TitleCard",
+              themeColor: "#818cf8",
+              content: {
+                headline: "前端新风向",
+                subhead: "DATA DRIVEN UI"
+              }
             },
+            {
+              narration: "分屏设计可以有效切分视觉区域，左侧锚定视觉重心，右侧快速传递核心参数。",
+              audioUrl: "",
+              audioDuration: 6,
+              layoutType: "SplitScreen",
+              themeColor: "#34d399",
+              content: {
+                title: "分屏布局的威力",
+                keywords: ["高对比", "呼吸感", "信息分离"]
+              }
+            },
+            {
+              narration: "最后，传统的要点浮窗也能通过毛玻璃背景焕发高端质感。",
+              audioUrl: "",
+              audioDuration: 7,
+              layoutType: "BulletPointsCard",
+              content: {
+                title: "核心总结",
+                points: ["Tailwind 提高效率", "JSON 驱动 UI", "组件自由组合"]
+              }
+            }
           ],
         }}
         calculateMetadata={({ props }) => {
