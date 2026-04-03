@@ -112,9 +112,12 @@
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import TemplatePreview from './components/template/TemplatePreview.vue'
 import TemplateEditor from './components/template/TemplateEditor.vue'
 import { getTemplatesList, deleteTemplate, saveTemplate, duplicateTemplate } from './api.js'
+
+const router = useRouter()
 
 const currentTab = ref('mine') // 'mine' or 'system'
 const templates = ref([])
@@ -194,7 +197,7 @@ async function handleDuplicate(tpl) {
 }
 
 function useTemplate(tpl) {
-  // 这里后续可以路由跳转到海报生成页并带上参数
-  console.log(`即将在生成面板中使用选项【${tpl.name}】`)
+  sessionStorage.setItem('use_template', JSON.stringify(tpl))
+  router.push({ name: 'poster', query: { tab: 'template', tpl_id: tpl.id } })
 }
 </script>

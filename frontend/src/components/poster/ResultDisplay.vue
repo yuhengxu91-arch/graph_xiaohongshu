@@ -21,22 +21,13 @@
 
     <!-- 成功态内容 -->
     <div v-if="result.success" class="p-8 space-y-10">
-      <!-- 单图展示 (Premium Preview) -->
+      <!-- 单图展示 -->
       <div v-if="result.mode !== 'batch' && result.mode !== 'export_all'" class="relative group">
         <div class="absolute -inset-4 bg-gradient-to-r from-blue-500/10 to-indigo-500/10 rounded-[3rem] blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
         <div class="relative bg-slate-900 rounded-[2.5rem] p-4 shadow-2xl overflow-hidden border-8 border-slate-900 mx-auto max-w-lg lg:max-w-2xl transform transition-transform duration-700 hover:scale-[1.02]">
-          <img
-            :src="getImageUrl(result.image_url)"
-            alt="生成的海报"
-            class="w-full h-auto rounded-[1.5rem] shadow-inner"
-          />
+          <img :src="getImageUrl(result.image_url)" alt="生成的海报" class="w-full h-auto rounded-[1.5rem] shadow-inner" />
           <div class="absolute top-8 right-8 flex flex-col gap-2">
-            <a 
-              :href="getImageUrl(result.image_url)" 
-              download 
-              class="w-12 h-12 bg-white/90 backdrop-blur-md rounded-2xl flex items-center justify-center shadow-xl hover:bg-white hover:scale-110 active:scale-95 transition-all"
-              title="下载原始图像"
-            >
+            <a :href="getImageUrl(result.image_url)" download class="w-12 h-12 bg-white/90 backdrop-blur-md rounded-2xl flex items-center justify-center shadow-xl hover:bg-white hover:scale-110 active:scale-95 transition-all" title="下载原始图像">
               <span class="text-xl">⬇️</span>
             </a>
           </div>
@@ -46,17 +37,11 @@
       <!-- 全平台套装展示 -->
       <div v-else-if="result.mode === 'export_all'" class="space-y-6">
         <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-6">
-          <div 
-            v-for="(imgInfo, idx) in result.images" 
-            :key="idx" 
-            class="group bg-slate-50 border border-slate-200 rounded-3xl p-4 hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all"
-          >
+          <div v-for="(imgInfo, idx) in result.images" :key="idx" class="group bg-slate-50 border border-slate-200 rounded-3xl p-4 hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all">
             <div class="aspect-[3/4] bg-slate-200 rounded-2xl overflow-hidden mb-4 relative shadow-inner">
               <img :src="getImageUrl(imgInfo.url)" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="适配图片" />
               <div class="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
-                <a :href="getImageUrl(imgInfo.url)" download class="p-3 bg-white rounded-xl shadow-xl hover:scale-110 transition-transform">
-                  📥
-                </a>
+                <a :href="getImageUrl(imgInfo.url)" download class="p-3 bg-white rounded-xl shadow-xl hover:scale-110 transition-transform">📥</a>
               </div>
             </div>
             <div class="text-center">
@@ -67,20 +52,53 @@
         </div>
       </div>
 
-      <!-- 批量提交成功 -->
-      <div v-else class="py-12 flex flex-col items-center text-center space-y-6 bg-blue-50/50 rounded-[2.5rem] border border-blue-100">
-        <div class="w-24 h-24 bg-white rounded-full flex items-center justify-center text-5xl shadow-xl shadow-blue-600/10 animate-bounce">
-          ✅
+      <!-- 批量任务：进度 + 图片网格 -->
+      <div v-else class="space-y-6">
+        <div class="p-6 bg-blue-50/50 rounded-[2rem] border border-blue-100 space-y-4">
+          <div class="flex items-center justify-between">
+            <h3 class="text-lg font-black text-slate-800 flex items-center gap-2">
+              <span v-if="batchPolling" class="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+              <span v-else>✅</span>
+              批量生成 · {{ batchStatusLabel }}
+            </h3>
+            <div class="text-xs font-mono text-slate-400">{{ result.task_id?.slice(0,8) }}</div>
+          </div>
+          <div v-if="batchStatus" class="space-y-2">
+            <div class="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+              <div class="h-full bg-blue-600 rounded-full transition-all duration-500" :style="{ width: batchProgress + '%' }"></div>
+            </div>
+            <div class="flex justify-between text-xs font-bold text-slate-500">
+              <span>成功 <span class="text-emerald-600">{{ batchStatus.success_count }}</span> / 失败 <span class="text-red-500">{{ batchStatus.failed_count }}</span></span>
+              <span>{{ batchStatus.success_count + batchStatus.failed_count }} / {{ batchStatus.total_count }}</span>
+            </div>
+          </div>
+          <div v-else class="text-sm text-slate-500">任务已提交，正在加载进度...</div>
         </div>
-        <div class="space-y-2">
-          <h3 class="text-2xl font-black text-slate-800 italic">批量生成任务已正式启航！</h3>
-          <div class="inline-flex items-center gap-2 px-4 py-2 bg-slate-800 text-white rounded-xl text-xs font-mono tracking-widest">
-            TASK ID: {{ result.task_id }}
+
+        <div v-if="batchStatus?.items?.length" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
+          <div v-for="item in batchStatus.items" :key="item.order_index" class="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
+            <div v-if="item.status === 'success' && item.image_url" class="aspect-[3/4] relative group">
+              <img :src="getImageUrl(item.image_url)" class="w-full h-full object-cover" />
+              <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                <a :href="getImageUrl(item.image_url)" download class="p-2 bg-white rounded-xl shadow-lg text-sm">📥</a>
+              </div>
+            </div>
+            <div v-else-if="item.status === 'running'" class="aspect-[3/4] bg-blue-50 flex flex-col items-center justify-center gap-2">
+              <div class="w-8 h-8 border-[3px] border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+              <span class="text-xs text-blue-500 font-bold">生成中...</span>
+            </div>
+            <div v-else-if="item.status === 'failed'" class="aspect-[3/4] bg-red-50 flex flex-col items-center justify-center gap-2 p-4">
+              <span class="text-2xl">❌</span>
+              <span class="text-xs text-red-500 text-center line-clamp-2">{{ item.error_message || '生成失败' }}</span>
+            </div>
+            <div v-else class="aspect-[3/4] bg-slate-50 flex items-center justify-center">
+              <span class="text-xs text-slate-400 font-bold">等待中...</span>
+            </div>
+            <div class="p-3 text-center">
+              <div class="text-xs font-bold text-slate-700 truncate">{{ item.title || `#${item.order_index + 1}` }}</div>
+            </div>
           </div>
         </div>
-        <p class="max-w-md text-slate-500 font-medium leading-relaxed px-8">
-          AI 艺术家正在为您处理海量创意。您可以现在离开，稍后至“作品库”查看您的成果。
-        </p>
       </div>
 
       <!-- 元数据卡片 -->
@@ -97,17 +115,10 @@
           <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">设计模板</div>
           <div class="text-sm font-bold text-slate-700 mt-1 truncate" :title="result.template_name">{{ result.template_name }}</div>
         </div>
-        <div class="bg-slate-50 rounded-2xl p-4 border border-slate-100">
-          <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest pl-1">生成耗时</div>
-          <div class="text-sm font-bold text-slate-700 mt-1">预计 15.2s</div>
-        </div>
       </div>
 
       <!-- 操作按钮 -->
       <div class="flex flex-col sm:flex-row gap-4 pt-6">
-        <button v-if="result.mode === 'batch'" class="flex-1 bg-slate-800 hover:bg-slate-900 text-white font-black py-4 rounded-2xl shadow-xl transition-all flex items-center justify-center gap-2" @click="checkBatchStatus">
-          <span>🔄</span> 查看进度
-        </button>
         <button class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl shadow-xl shadow-blue-600/20 transition-all flex items-center justify-center gap-2 border-b-4 border-blue-800 active:border-b-0 active:translate-y-1" @click="$emit('reset')">
           <span>🎨</span> 继续创作
         </button>
@@ -131,24 +142,16 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { ref, computed, watch, onUnmounted } from 'vue'
+import { getBatchStatus } from '../../api.js'
 
 const props = defineProps({
-  result: {
-    type: Object,
-    default: null
-  }
+  result: { type: Object, default: null }
 })
 
 defineEmits(['reset'])
 
 const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
-
-function checkBatchStatus() {
-  if (props.result && props.result.task_id) {
-    alert(`暂未开发轮询弹窗功能。\n当前任务 ID: ${props.result.task_id}\n请等待后续后端接口测试完成！`);
-  }
-}
 
 function getImageUrl(url) {
   if (!url) return ''
@@ -156,9 +159,57 @@ function getImageUrl(url) {
   return `${API_BASE}${url}`
 }
 
-const badgeTailwindClass = computed(() => {
-  if (!props.result) return ''
-  return map[props.result.mode]?.tailwind || 'bg-slate-100 text-slate-600'
+const batchStatus = ref(null)
+const batchPolling = ref(false)
+let pollTimer = null
+
+const batchProgress = computed(() => {
+  if (!batchStatus.value) return 0
+  const { success_count, failed_count, total_count } = batchStatus.value
+  if (!total_count) return 0
+  return Math.round(((success_count + failed_count) / total_count) * 100)
+})
+
+const batchStatusLabel = computed(() => {
+  if (!batchStatus.value) return '已提交'
+  const s = batchStatus.value.status
+  if (s === 'running') return '进行中...'
+  if (s === 'completed') return '全部完成'
+  if (s === 'partial_failed') return '部分失败'
+  if (s === 'failed') return '全部失败'
+  return s
+})
+
+async function pollBatch(taskId) {
+  batchPolling.value = true
+  try {
+    const data = await getBatchStatus(taskId)
+    batchStatus.value = data
+
+    const done = ['completed', 'partial_failed', 'failed'].includes(data.status)
+    if (done) {
+      batchPolling.value = false
+      return
+    }
+    pollTimer = setTimeout(() => pollBatch(taskId), 3000)
+  } catch (e) {
+    console.error('轮询批量状态失败:', e)
+    pollTimer = setTimeout(() => pollBatch(taskId), 5000)
+  }
+}
+
+watch(() => props.result, (val) => {
+  if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
+  batchStatus.value = null
+  batchPolling.value = false
+
+  if (val?.success && val?.mode === 'batch' && val?.task_id) {
+    pollBatch(val.task_id)
+  }
+}, { immediate: true })
+
+onUnmounted(() => {
+  if (pollTimer) clearTimeout(pollTimer)
 })
 
 const map = {
@@ -172,6 +223,14 @@ const map = {
   style_transfer: { label: '风格迁移', tailwind: 'bg-fuchsia-100 text-fuchsia-700' },
   batch: { label: '极速大批量', tailwind: 'bg-teal-100 text-teal-700' },
 }
+
+const badgeTailwindClass = computed(() => {
+  if (!props.result) return ''
+  return map[props.result.mode]?.tailwind || 'bg-slate-100 text-slate-600'
+})
+
+const modeLabel = computed(() => {
+  if (!props.result) return ''
+  return map[props.result.mode]?.label || props.result.mode || ''
+})
 </script>
-
-

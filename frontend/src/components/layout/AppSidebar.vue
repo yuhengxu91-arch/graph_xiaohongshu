@@ -98,10 +98,29 @@ const props = defineProps({
   activePage: {
     type: String,
     required: true
+  },
+  loading: {
+    type: Boolean,
+    default: false
+  },
+  threadList: {
+    type: Array,
+    default: () => []
+  },
+  currentThreadId: {
+    type: String,
+    default: ''
   }
 })
 
-const emit = defineEmits(['update:modelValue', 'update:activePage', 'new-workflow'])
+const emit = defineEmits([
+  'update:modelValue', 
+  'update:activePage', 
+  'new-workflow',
+  'switch-thread',
+  'delete-thread',
+  'refresh-list'
+])
 
 const mainNavItems = [
   { name: '内容工作流', icon: '⚡️', path: 'workflow' },

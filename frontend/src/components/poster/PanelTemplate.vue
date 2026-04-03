@@ -150,7 +150,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import RatioSelector from './RatioSelector.vue'
 
 const props = defineProps({
@@ -166,6 +166,32 @@ const form = ref({
   params: {},
   colorOption: '',
   aspectRatio: null,
+})
+
+onMounted(() => {
+  const saved = sessionStorage.getItem('use_template')
+  if (saved) {
+    sessionStorage.removeItem('use_template')
+    try {
+      const tpl = JSON.parse(saved)
+      if (tpl && tpl.config) {
+        selectTemplate({
+          id: tpl.id || null,
+          index: tpl.sort_order || 0,
+          name: tpl.name,
+          description: tpl.description,
+          category: tpl.category,
+          style_tag: tpl.style_tag,
+          text_slots: tpl.config.text_slots || [],
+          color_options: tpl.config.color_options || [],
+          default_aspect_ratio: tpl.config.default_aspect_ratio || '3:4',
+          ai_prompt_template: tpl.config.ai_prompt_template || '',
+        })
+      }
+    } catch (e) {
+      console.error('解析模板数据失败:', e)
+    }
+  }
 })
 
 const isValid = computed(() => {

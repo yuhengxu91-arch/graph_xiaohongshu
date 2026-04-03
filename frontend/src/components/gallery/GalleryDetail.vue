@@ -160,9 +160,7 @@ function copyText(text) {
 }
 
 function handleDelete() {
-  if (confirm('确定要永久删除这份作品记录吗？图片文件也会被一并清理。')) {
-    emit('delete', props.item.id)
-  }
+  emit('delete', props.item.id)
 }
 </script>
 

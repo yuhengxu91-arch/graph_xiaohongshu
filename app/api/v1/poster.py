@@ -12,6 +12,7 @@ from app.dependencies.auth import get_current_user_optional
 from app.models.user import User
 from app.services.poster_service import poster_service
 from app.services.gallery_service import gallery_service
+from app.services.profile_service import profile_service
 
 router = APIRouter(prefix="/poster", tags=["Poster"])
 
@@ -28,7 +29,8 @@ class CustomGenerateRequest(BaseModel):
 
 class TemplateGenerateRequest(BaseModel):
     """模板生成请求"""
-    template_index: int = Field(..., description="模板索引（从0开始）", ge=0)
+    template_index: Optional[int] = Field(None, description="系统模板索引（从0开始）", ge=0)
+    template_id: Optional[str] = Field(None, description="个人模板 ID（UUID）")
     params: Dict[str, str] = Field(..., description="文案参数，如 {title: '...', subtitle: '...'}")
     style_tag: Optional[str] = Field(None, description="覆盖模板默认风格")
     color_option: Optional[str] = Field(None, description="色调选项")
@@ -93,6 +95,15 @@ async def _auto_save_generation(
         generation_result=result,
         request_payload=request_payload,
     )
+
+
+async def _get_user_provider(
+    db: AsyncSession, user: Optional[User]
+) -> Optional[str]:
+    """获取当前用户的图片生成引擎偏好"""
+    if not user:
+        return None
+    return await profile_service.get_user_image_provider(db, user_id=user.id)
 
 
 # ======================== 查询接口 ========================
@@ -161,6 +172,26 @@ async def get_aspect_ratios():
     }
 
 
+# ======================== 提示词生成接口 ========================
+
+@router.post("/generate-prompt", summary="生成提示词（不生成图片）")
+async def generate_prompt_only(req: CustomGenerateRequest):
+    """
+    调用 LLM 生成优化的英文提示词，供 Nano Banana Pro 等外部工具使用。
+    不调用图片生成 API，只生成文本提示词。
+    """
+    try:
+        result = await poster_service.build_external_prompt(
+            user_prompt=req.prompt,
+            style_tags=req.style_tags,
+            aspect_ratio=req.aspect_ratio,
+            color_tone=req.color_tone,
+        )
+        return result
+    except Exception as e:
+        return {"success": False, "error": f"提示词生成失败: {str(e)}"}
+
+
 # ======================== 生成接口 ========================
 
 @router.post("/generate/custom", response_model=GenerateResponse, summary="自定义生成海报")
@@ -177,11 +208,13 @@ async def generate_custom(
     - AI 直接生成完整海报图片
     """
     try:
+        provider = await _get_user_provider(db, current_user)
         result = await poster_service.generate_custom(
             prompt=req.prompt,
             style_tags=req.style_tags,
             aspect_ratio=req.aspect_ratio,
             color_tone=req.color_tone,
+            provider_override=provider,
         )
         await _auto_save_generation(
             db=db,
@@ -207,18 +240,45 @@ async def generate_from_template(
     """
     模板生成海报
 
-    - 选择预置模板后填写文案参数
+    - 支持系统预置模板（template_index）和个人模板（template_id）
     - 可覆盖模板默认风格和色调
     - AI 基于模板约束生成海报
     """
     try:
-        result = await poster_service.generate_from_template(
-            template_index=req.template_index,
-            params=req.params,
-            style_tag=req.style_tag,
-            color_option=req.color_option,
-            aspect_ratio=req.aspect_ratio,
-        )
+        provider = await _get_user_provider(db, current_user)
+
+        # 个人模板（数据库）: 通过 template_id 查找
+        if req.template_id:
+            from app.services.template_service import template_service
+            from uuid import UUID as _UUID
+            tpl = await template_service.get_template(db, template_id=_UUID(req.template_id))
+            if not tpl:
+                return GenerateResponse(success=False, error=f"模板 {req.template_id} 不存在")
+
+            # 用数据库模板的 config 调用生成
+            result = await poster_service.generate_from_db_template(
+                template_config=tpl.config or {},
+                template_name=tpl.name,
+                template_style_tag=tpl.style_tag,
+                params=req.params,
+                style_tag=req.style_tag,
+                color_option=req.color_option,
+                aspect_ratio=req.aspect_ratio,
+                provider_override=provider,
+            )
+            # 使用次数 +1
+            await template_service.increment_use_count(db, template_id=tpl.id)
+        else:
+            # 系统模板: 通过 template_index 查找
+            result = await poster_service.generate_from_template(
+                template_index=req.template_index or 0,
+                params=req.params,
+                style_tag=req.style_tag,
+                color_option=req.color_option,
+                aspect_ratio=req.aspect_ratio,
+                provider_override=provider,
+            )
+
         await _auto_save_generation(
             db=db,
             current_user=current_user,
@@ -248,10 +308,12 @@ async def generate_edit(
     - AI 根据指令修改图片
     """
     try:
+        provider = await _get_user_provider(db, current_user)
         result = await poster_service.generate_edit(
             image_base64=req.image_base64,
             edit_prompt=req.edit_prompt,
             aspect_ratio=req.aspect_ratio,
+            provider_override=provider,
         )
         await _auto_save_generation(
             db=db,
@@ -283,11 +345,13 @@ async def generate_style_transfer(
     - AI 将图片转换为目标风格
     """
     try:
+        provider = await _get_user_provider(db, current_user)
         result = await poster_service.generate_style_transfer(
             image_base64=req.image_base64,
             style_tags=req.style_tags,
             strength=req.strength,
             aspect_ratio=req.aspect_ratio,
+            provider_override=provider,
         )
         await _auto_save_generation(
             db=db,
@@ -334,11 +398,13 @@ async def generate_inpaint(
     - AI 仅修改遮罩区域，保留其余部分不变
     """
     try:
+        provider = await _get_user_provider(db, current_user)
         result = await poster_service.generate_inpaint(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
             inpaint_prompt=req.inpaint_prompt,
             aspect_ratio=req.aspect_ratio,
+            provider_override=provider,
         )
         await _auto_save_generation(
             db=db,
@@ -366,9 +432,11 @@ async def generate_erase(
     - 无需提示词
     """
     try:
+        provider = await _get_user_provider(db, current_user)
         result = await poster_service.generate_erase(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
+            provider_override=provider,
         )
         await _auto_save_generation(
             db=db,
@@ -424,12 +492,14 @@ async def generate_adapt(
     - AI 扩图模式下可提供补充提示词以优化扩展区域
     """
     try:
+        provider = await _get_user_provider(db, current_user)
         result = await poster_service.generate_adapt(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
             target_ratio=req.target_ratio,
             strategy=req.strategy,
             outpaint_prompt=req.outpaint_prompt,
+            provider_override=provider,
         )
         await _auto_save_generation(
             db=db,
@@ -457,11 +527,13 @@ async def generate_export_all(
     - 返回多张适配后的图片
     """
     try:
+        provider = await _get_user_provider(db, current_user)
         result = await poster_service.generate_export_all(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
             strategy=req.strategy,
             outpaint_prompt=req.outpaint_prompt,
+            provider_override=provider,
         )
         await _auto_save_generation(
             db=db,

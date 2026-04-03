@@ -31,10 +31,17 @@ class PosterService:
     """海报生成服务类"""
 
     def __init__(self):
-        # AI 图片生成 API 配置（复用 image_service 的配置）
+        self.provider = os.getenv("IMAGE_PROVIDER", "gemini").lower()
+
+        # Gemini 代理 1（xunruijie）
         self.api_key = os.getenv("IMAGE_API_KEY", "")
-        self.base_url = os.getenv("IMAGE_BASE_URL", "https://cn-beijing.yuannengai.com")
+        self.base_url = os.getenv("IMAGE_BASE_URL", "https://api.xunruijie.com")
         self.model = os.getenv("IMAGE_MODEL", "gemini-3-pro-image-preview")
+
+        # Gemini 代理 2（changhuai）
+        self.api_key_ch = os.getenv("IMAGE_API_KEY_CH", "")
+        self.base_url_ch = os.getenv("IMAGE_BASE_URL_CH", "https://www.changhuai.vip")
+        self.model_ch = os.getenv("IMAGE_MODEL_CH", "gemini-3-pro-image-preview")
 
         # 输出目录
         self.output_dir = Path("static/images/posters")
@@ -45,8 +52,17 @@ class PosterService:
         self._style_tags: List[Dict] = []
         self._load_preset_data()
 
-        if not self.api_key:
-            raise ValueError("IMAGE_API_KEY 未配置，海报生成服务无法启动")
+        active_key = os.getenv("JIMENG_ACCESS_KEY", "") if self.provider == "jimeng" else self.api_key
+        if not active_key:
+            print(f"[PosterService] 警告: API Key 未配置（当前引擎: {self.provider}），图片生成功能不可用")
+
+        print(f"[PosterService] 图片引擎: {self.provider}")
+
+    def _get_effective_provider(self, provider_override: Optional[str] = None) -> str:
+        """获取实际使用的引擎，支持用户偏好覆盖"""
+        if provider_override and provider_override != "system":
+            return provider_override
+        return self.provider
 
     # ======================== 预置数据加载 ========================
 
@@ -103,6 +119,7 @@ class PosterService:
         style_tags: Optional[List[str]] = None,
         aspect_ratio: str = "3:4",
         color_tone: Optional[str] = None,
+        provider_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         自定义生成海报
@@ -126,7 +143,7 @@ class PosterService:
 
         # 3. 调用 AI 生成图片
         print(f"[PosterService] 自定义生成: {prompt[:50]}...")
-        image_base64 = await self._call_ai_image_api(enhanced_prompt)
+        image_base64 = await self._call_ai_image_api(enhanced_prompt, provider_override=provider_override)
 
         if not image_base64:
             return {
@@ -157,6 +174,7 @@ class PosterService:
         style_tag: Optional[str] = None,
         color_option: Optional[str] = None,
         aspect_ratio: Optional[str] = None,
+        provider_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         模板生成海报
@@ -205,30 +223,40 @@ class PosterService:
         effective_ratio = aspect_ratio or config.get("default_aspect_ratio", "3:4")
         ratio_info = ASPECT_RATIOS.get(effective_ratio, ASPECT_RATIOS["3:4"])
 
-        # 6. 构建 AI 提示词 — 使用模板的 prompt 模板
-        ai_prompt_template = config.get(
-            "ai_prompt_template",
-            "生成一张'{title}'主题的海报背景，{style_desc}风格，{color_desc}色调，不含文字"
-        )
+        # 6. 构建 AI 提示词
+        ai_prompt_template = config.get("ai_prompt_template", "")
 
-        # 将参数填入模板
         format_params = {
             **params,
             "style_desc": style_desc,
             "color_desc": color_desc,
         }
 
-        try:
-            ai_prompt = ai_prompt_template.format(**format_params)
-        except KeyError as e:
-            return {"success": False, "error": f"模板参数缺失: {e}"}
+        if ai_prompt_template:
+            try:
+                ai_prompt = ai_prompt_template.format(**format_params)
+            except KeyError:
+                ai_prompt = ""
+
+        if not ai_prompt_template or not ai_prompt.strip():
+            parts = [f"生成一张「{template['name']}」主题的高质量海报图片。"]
+            for slot in config.get("text_slots", []):
+                val = params.get(slot["name"], "")
+                if val:
+                    parts.append(f"{slot['label']}：{val}")
+            if style_desc:
+                parts.append(f"风格：{style_desc}")
+            if color_desc:
+                parts.append(f"色调：{color_desc}")
+            parts.append("画面精致，排版美观，适合社交媒体发布。")
+            ai_prompt = "\n".join(parts)
 
         # 7. 添加尺寸约束
         ai_prompt += f"\n\n图片比例要求：{effective_ratio}（{ratio_info['label']}平台适用）"
 
         # 8. 调用 AI 生成
         print(f"[PosterService] 模板生成 [{template['name']}]: {params.get('title', '')}")
-        image_base64 = await self._call_ai_image_api(ai_prompt)
+        image_base64 = await self._call_ai_image_api(ai_prompt, provider_override=provider_override)
 
         if not image_base64:
             return {
@@ -252,6 +280,105 @@ class PosterService:
             "params": params,
         }
 
+    # ======================== 数据库模板（个人模板）生成 ========================
+
+    async def generate_from_db_template(
+        self,
+        template_config: Dict[str, Any],
+        template_name: str,
+        template_style_tag: Optional[str],
+        params: Dict[str, str],
+        style_tag: Optional[str] = None,
+        color_option: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+        provider_override: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        使用数据库中的个人模板生成海报
+
+        与 generate_from_template 逻辑一致，但模板配置直接从数据库传入
+        而非通过 index 查询系统预置 JSON
+        """
+        config = template_config
+
+        # 1. 确定风格描述
+        effective_style = style_tag or template_style_tag or ""
+        style_desc = ""
+        if effective_style:
+            tag_info = self.get_style_tag_by_name(effective_style)
+            if tag_info:
+                style_desc = tag_info["prompt_snippet"]
+            else:
+                style_desc = effective_style
+
+        # 2. 确定色调
+        color_desc = color_option or (
+            config.get("color_options", ["自然"])[0] if config.get("color_options") else "自然"
+        )
+
+        # 3. 确定输出比例
+        effective_ratio = aspect_ratio or config.get("default_aspect_ratio", "3:4")
+        ratio_info = ASPECT_RATIOS.get(effective_ratio, ASPECT_RATIOS["3:4"])
+
+        # 4. 构建 AI 提示词
+        ai_prompt_template = config.get("ai_prompt_template", "")
+
+        format_params = {
+            **params,
+            "style_desc": style_desc,
+            "color_desc": color_desc,
+        }
+
+        ai_prompt = ""
+        if ai_prompt_template:
+            try:
+                ai_prompt = ai_prompt_template.format(**format_params)
+            except KeyError as e:
+                print(f"[PosterService] 个人模板提示词格式化失败，缺少变量: {e}")
+                ai_prompt = ""
+
+        if not ai_prompt.strip():
+            parts = [f"生成一张「{template_name}」主题的高质量海报图片。"]
+            for key, val in params.items():
+                if val:
+                    parts.append(f"{key}：{val}")
+            if style_desc:
+                parts.append(f"风格：{style_desc}")
+            if color_desc:
+                parts.append(f"色调：{color_desc}")
+            parts.append("画面精致，排版美观，适合社交媒体发布。")
+            ai_prompt = "\n".join(parts)
+
+        # 5. 添加尺寸约束
+        ai_prompt += f"\n\n图片比例要求：{effective_ratio}（{ratio_info['label']}平台适用）"
+
+        # 6. 调用 AI 生成
+        print(f"[PosterService] 个人模板生成 [{template_name}]: {params.get('title', '')}")
+        print(f"[PosterService] 提示词: {ai_prompt[:200]}...")
+        image_base64 = await self._call_ai_image_api(ai_prompt, provider_override=provider_override)
+
+        if not image_base64:
+            return {
+                "success": False,
+                "error": "AI 图片生成失败，请稍后重试",
+                "prompt_used": ai_prompt,
+            }
+
+        # 7. 保存图片
+        image_url = self._save_image(image_base64, prefix="poster_tpl")
+
+        return {
+            "success": True,
+            "image_url": image_url,
+            "prompt_used": ai_prompt,
+            "template_name": template_name,
+            "aspect_ratio": effective_ratio,
+            "width": ratio_info["width"],
+            "height": ratio_info["height"],
+            "mode": "template",
+            "params": params,
+        }
+
     # ======================== 以图改图 ========================
 
     async def generate_edit(
@@ -259,6 +386,7 @@ class PosterService:
         image_base64: str,
         edit_prompt: str,
         aspect_ratio: str = "3:4",
+        provider_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         以图改图 — 上传原始图片 + 编辑指令，AI 修改图片内容
@@ -277,7 +405,8 @@ class PosterService:
 
         print(f"[PosterService] 以图改图: {edit_prompt[:50]}...")
         image_result_base64 = await self._call_ai_image_api(
-            enhanced_prompt, input_image_base64=image_base64
+            enhanced_prompt, input_image_base64=image_base64,
+            provider_override=provider_override,
         )
 
         if not image_result_base64:
@@ -307,6 +436,7 @@ class PosterService:
         style_tags: List[str],
         strength: str = "medium",
         aspect_ratio: str = "3:4",
+        provider_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         风格迁移 — 将原始图片转换为目标风格
@@ -329,7 +459,8 @@ class PosterService:
         style_names = ", ".join(style_tags)
         print(f"[PosterService] 风格迁移: {style_names} | 强度={strength}")
         image_result_base64 = await self._call_ai_image_api(
-            enhanced_prompt, input_image_base64=image_base64
+            enhanced_prompt, input_image_base64=image_base64,
+            provider_override=provider_override,
         )
 
         if not image_result_base64:
@@ -361,6 +492,7 @@ class PosterService:
         mask_base64: str,
         inpaint_prompt: str,
         aspect_ratio: str = "3:4",
+        provider_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         局部重绘 — 根据遮罩区域和文字提示替换指定区域内容
@@ -381,6 +513,7 @@ class PosterService:
                 enhanced_prompt,
                 input_image_base64=image_base64,
                 mask_image_base64=mask_base64,
+                provider_override=provider_override,
             )
 
             if not image_result:
@@ -404,6 +537,7 @@ class PosterService:
         self,
         image_base64: str,
         mask_base64: str,
+        provider_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         智能擦除 — 擦除遮罩区域的内容并自动补全背景
@@ -422,6 +556,7 @@ class PosterService:
                 erase_prompt,
                 input_image_base64=image_base64,
                 mask_image_base64=mask_base64,
+                provider_override=provider_override,
             )
 
             if not image_result:
@@ -449,6 +584,7 @@ class PosterService:
         target_ratio: str,
         strategy: str = "outpaint",
         outpaint_prompt: Optional[str] = None,
+        provider_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         将图片从源比例适配到目标比例
@@ -477,7 +613,8 @@ class PosterService:
 
             # 调用 AI API（传入原图）
             image_result = await self._call_ai_image_api(
-                prompt, input_image_base64=image_base64
+                prompt, input_image_base64=image_base64,
+                provider_override=provider_override,
             )
 
             if not image_result:
@@ -506,6 +643,7 @@ class PosterService:
         source_ratio: str,
         strategy: str = "outpaint",
         outpaint_prompt: Optional[str] = None,
+        provider_override: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         全平台一键导出 — 并发适配为所有不同于源比例的目标尺寸
@@ -536,6 +674,7 @@ class PosterService:
                     target_ratio=ratio,
                     strategy=strategy,
                     outpaint_prompt=outpaint_prompt,
+                    provider_override=provider_override,
                 )
 
         # 并发执行所有适配任务
@@ -663,6 +802,70 @@ class PosterService:
 
         return prompt
 
+    PROMPT_OPTIMIZER_SYSTEM = """你是一位专业的 AI 图片提示词工程师。你的任务是将用户的创意描述转化为一段高质量、细节丰富的中文提示词，专门用于 AI 图片生成工具（如 Midjourney、DALL-E、Stable Diffusion、Nano Banana Pro）。
+
+规则：
+1. 只输出最终的提示词，不要任何解释、markdown 格式或引号。
+2. 提示词应为一段连贯的描述，视觉细节丰富。
+3. 必须包含：主体描述、构图方式、光影效果、色彩搭配、氛围/情绪、视角/镜头感、画面质感关键词。
+4. 自然融入用户指定的风格、色调和尺寸要求。
+5. 末尾加上画质增强关键词，如"8K超清、超精细、专业摄影级、高品质渲染"等。
+6. 控制在 300 字以内。"""
+
+    async def build_external_prompt(
+        self,
+        user_prompt: str,
+        style_tags: Optional[List[str]] = None,
+        aspect_ratio: str = "3:4",
+        color_tone: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        调用 LLM 生成供外部图片生成工具（如 Nano Banana Pro）使用的优化英文提示词。
+        """
+        from app.services.llm_service import llm_service
+        from langchain_core.messages import HumanMessage, SystemMessage
+
+        # 收集用户意图上下文
+        context_parts = [f"用户描述：{user_prompt}"]
+
+        if style_tags:
+            snippets = []
+            for tag_name in style_tags:
+                tag = self.get_style_tag_by_name(tag_name)
+                if tag:
+                    snippets.append(f"{tag_name} ({tag['prompt_snippet']})")
+                else:
+                    snippets.append(tag_name)
+            context_parts.append(f"风格要求：{', '.join(snippets)}")
+
+        if color_tone:
+            context_parts.append(f"色调偏好：{color_tone}")
+
+        ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
+        context_parts.append(
+            f"输出尺寸：{aspect_ratio} ({ratio_info['width']}x{ratio_info['height']}, {ratio_info['label']}平台)"
+        )
+
+        user_context = "\n".join(context_parts)
+
+        messages = [
+            SystemMessage(content=self.PROMPT_OPTIMIZER_SYSTEM),
+            HumanMessage(content=user_context),
+        ]
+
+        response = await llm_service.llm_fast.ainvoke(messages)
+        optimized_prompt = response.content.strip().strip('"\'')
+
+        return {
+            "success": True,
+            "prompt": optimized_prompt,
+            "aspect_ratio": aspect_ratio,
+            "width": ratio_info["width"],
+            "height": ratio_info["height"],
+            "style_tags": style_tags or [],
+            "color_tone": color_tone,
+        }
+
     def _inject_brand(self, prompt: str, brand_kit: Any) -> str:
         """
         将品牌包信息注入到 AI 提示词中。
@@ -768,21 +971,104 @@ class PosterService:
         self, prompt: str,
         input_image_base64: Optional[str] = None,
         mask_image_base64: Optional[str] = None,
+        provider_override: Optional[str] = None,
     ) -> Optional[str]:
         """
-        调用 Gemini 图片生成/编辑 API
-
-        Args:
-            prompt: 文本提示词
-            input_image_base64: 可选，输入图片的 base64 数据（用于以图改图/风格迁移）
-            mask_image_base64: 可选，遮罩图片的 base64 数据（用于局部重绘/擦除）
-
-        Returns:
-            base64 编码的结果图片数据，失败返回 None
+        根据 IMAGE_PROVIDER 分派到对应的图片生成 API。
+        返回 base64 编码的结果图片数据，失败返回 None。
         """
-        url = f"{self.base_url}/v1beta/models/{self.model}:generateContent"
+        effective = self._get_effective_provider(provider_override)
+        if effective == "doubao":
+            return await self._call_doubao_image_api(prompt, input_image_base64)
+        if effective == "jimeng":
+            return await self._call_jimeng_api(prompt, input_image_base64)
+        if effective == "gemini_ch":
+            return await self._call_gemini_api(prompt, input_image_base64, mask_image_base64, use_changhuai=True)
+        return await self._call_gemini_api(prompt, input_image_base64, mask_image_base64)
 
-        # 构建 parts：先图片后文本（Gemini 推荐顺序）
+    async def _call_doubao_image_api(
+        self, prompt: str,
+        input_image_base64: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        调用火山方舟 doubao-seedream 图片生成 API。
+        使用和 LLM 相同的 API Key，OpenAI 兼容格式。
+        """
+        llm_api_key = os.getenv("LLM_API_KEY", "")
+        llm_base_url = os.getenv("LLM_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+        model = os.getenv("DOUBAO_IMAGE_MODEL", "doubao-seedream-3-0-t2i-250415")
+
+        if not llm_api_key:
+            print("[PosterService] LLM_API_KEY 未配置，无法使用 doubao 生图")
+            return None
+
+        url = f"{llm_base_url}/images/generations"
+        payload: Dict[str, Any] = {
+            "model": model,
+            "prompt": prompt,
+            "response_format": "url",
+            "size": "2048x2048",
+        }
+
+        if input_image_base64:
+            if not input_image_base64.startswith("data:"):
+                payload["image"] = f"data:image/png;base64,{input_image_base64}"
+            else:
+                payload["image"] = input_image_base64
+
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {llm_api_key}",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                result = response.json()
+
+                data_list = result.get("data", [])
+                if data_list:
+                    item = data_list[0]
+                    if item.get("b64_json"):
+                        return item["b64_json"]
+                    if item.get("url"):
+                        img_resp = await client.get(item["url"], timeout=60.0)
+                        img_resp.raise_for_status()
+                        return base64.b64encode(img_resp.content).decode("utf-8")
+
+                print(f"[PosterService] doubao 生图响应中未找到图片: {str(result)[:200]}")
+                return None
+
+        except httpx.HTTPStatusError as e:
+            print(f"[PosterService] doubao 生图 HTTP 错误: {e.response.status_code} {e.response.text[:300]}")
+            return None
+        except Exception as e:
+            print(f"[PosterService] doubao 生图异常: {e}")
+            return None
+
+    async def _call_gemini_api(
+        self, prompt: str,
+        input_image_base64: Optional[str] = None,
+        mask_image_base64: Optional[str] = None,
+        use_changhuai: bool = False,
+    ) -> Optional[str]:
+        """调用 Gemini 图片生成/编辑 API"""
+        if use_changhuai:
+            api_key = self.api_key_ch
+            base_url = self.base_url_ch
+            model = self.model_ch
+            tag = "Gemini-CH"
+        else:
+            api_key = self.api_key
+            base_url = self.base_url
+            model = self.model
+            tag = "Gemini"
+
+        url = f"{base_url}/v1beta/models/{model}:generateContent"
+        print(f"[PosterService] {tag} 请求 URL: {url}")
+        print(f"[PosterService] {tag} 使用模型: {model}")
+
         parts = []
         if input_image_base64:
             parts.append({
@@ -791,7 +1077,6 @@ class PosterService:
                     "data": input_image_base64,
                 }
             })
-        # 局部重绘/擦除时追加 Mask 图片
         if mask_image_base64:
             parts.append({
                 "inlineData": {
@@ -805,10 +1090,9 @@ class PosterService:
             "contents": [{"parts": parts}],
             "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
         }
-
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}",
+            "Authorization": f"Bearer {api_key}",
         }
 
         try:
@@ -817,20 +1101,67 @@ class PosterService:
                 response.raise_for_status()
                 result = response.json()
 
-                # 从响应中提取图片数据
                 if "candidates" in result and result["candidates"]:
                     for part in result["candidates"][0]["content"]["parts"]:
                         if "inlineData" in part:
                             return part["inlineData"]["data"]
 
-                print("[PosterService] API 响应中未找到图片数据")
+                print(f"[PosterService] {tag} 响应中未找到图片数据")
                 return None
 
         except httpx.HTTPStatusError as e:
-            print(f"[PosterService] HTTP 错误: {e.response.status_code}")
+            print(f"[PosterService] {tag} HTTP 错误: {e.response.status_code} {e.response.text[:200]}")
             return None
         except Exception as e:
-            print(f"[PosterService] 请求异常: {e}")
+            print(f"[PosterService] {tag} 请求异常: {e}")
+            return None
+
+    async def _call_jimeng_api(
+        self, prompt: str,
+        input_image_base64: Optional[str] = None,
+    ) -> Optional[str]:
+        """
+        调用火山引擎即梦图片生成 API（HMAC-SHA256 V4 签名认证）。
+        """
+        from app.services._volcengine_sign import volcengine_signed_request
+
+        ak = os.getenv("JIMENG_ACCESS_KEY", "")
+        sk = os.getenv("JIMENG_SECRET_KEY", "")
+        if not ak or not sk:
+            print("[PosterService] 即梦 AK/SK 未配置")
+            return None
+
+        body_params: Dict[str, Any] = {
+            "req_key": "high_aes_general_v21_L",
+            "prompt": prompt,
+            "width": 1024,
+            "height": 1024,
+            "use_pre_llm": True,
+            "use_sr": True,
+            "return_url": True,
+            "logo_info": {"add_logo": False},
+        }
+
+        if input_image_base64:
+            body_params["binary_data_base64"] = [input_image_base64]
+            body_params["req_key"] = "high_aes_general_v21_L"
+
+        try:
+            result = await volcengine_signed_request(ak, sk, body_params)
+
+            if result.get("code") == 10000:
+                image_urls = result.get("data", {}).get("image_urls", [])
+                if image_urls:
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        img_resp = await client.get(image_urls[0])
+                        img_resp.raise_for_status()
+                        return base64.b64encode(img_resp.content).decode("utf-8")
+
+            print(f"[PosterService] 即梦返回错误: code={result.get('code')}, msg={result.get('message', '')}")
+            return None
+
+        except Exception as e:
+            print(f"[PosterService] 即梦请求异常: {e}")
             return None
 
     def _save_image(self, image_base64: str, prefix: str = "poster") -> str:

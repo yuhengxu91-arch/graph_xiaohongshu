@@ -17,7 +17,7 @@
       <div class="max-w-7xl mx-auto">
         <GalleryFilter 
           :filters="currentFilters"
-          @update:filters="currentFilters = $event"
+          @update:filters="onFiltersUpdate"
           @search="handleSearch"
         />
       </div>
@@ -27,7 +27,7 @@
     <div class="flex-1 overflow-y-auto px-8 pb-8 custom-scrollbar">
       <div class="max-w-7xl mx-auto relative px-2">
         <!-- 批量操作工具栏 (悬浮) -->
-        <div class="sticky top-0 z-20 mb-4 h-0 overflow-visible">
+        <div class="sticky top-0 z-20 h-0 overflow-visible mt-2">
           <BatchToolbar
             :selectedCount="selectedIds.length"
             @select-all="selectAll"
@@ -38,7 +38,8 @@
         </div>
 
         <!-- 作品网格 -->
-        <GalleryGrid 
+        <div :class="[selectedIds.length > 0 ? 'pt-28 md:pt-24' : 'pt-2', 'transition-all duration-300 ease-out']">
+          <GalleryGrid  
           :items="workList"
           :loading="loading"
           :has-more="hasMore"
@@ -49,6 +50,7 @@
           @load-more="loadNextPage"
           @toggle-selection="toggleItemSelection"
         />
+        </div>
       </div>
     </div>
 
@@ -61,6 +63,16 @@
       @delete="handleDeleteWork"
       @remix="remixWork"
     />
+
+    <!-- 二次确认弹窗 -->
+    <ConfirmModal 
+      :is-open="confirmState.isOpen"
+      :title="confirmState.title"
+      :message="confirmState.message"
+      :danger="confirmState.danger"
+      @confirm="handleConfirmAccept"
+      @cancel="confirmState.isOpen = false"
+    />
   </div>
 </template>
 
@@ -70,6 +82,7 @@ import GalleryFilter from './components/gallery/GalleryFilter.vue'
 import GalleryGrid from './components/gallery/GalleryGrid.vue'
 import GalleryDetail from './components/gallery/GalleryDetail.vue'
 import BatchToolbar from './components/gallery/BatchToolbar.vue'
+import ConfirmModal from './components/common/ConfirmModal.vue'
 
 import {
   getGalleryList,
@@ -99,6 +112,30 @@ const currentFilters = reactive({
   tags: '',
   sort_by: 'created_at_desc'
 })
+
+// ============== 弹窗确认状态 ==============
+const confirmState = reactive({
+  isOpen: false,
+  title: '',
+  message: '',
+  danger: true,
+  action: null
+})
+
+function showConfirm(title, message, danger, action) {
+  confirmState.title = title
+  confirmState.message = message
+  confirmState.danger = danger
+  confirmState.action = action
+  confirmState.isOpen = true
+}
+
+function handleConfirmAccept() {
+  if (confirmState.action) {
+    confirmState.action()
+  }
+  confirmState.isOpen = false
+}
 
 // ============== 初始化 ==============
 onMounted(() => {
@@ -145,6 +182,10 @@ async function loadData() {
   } finally {
     loading.value = false
   }
+}
+
+function onFiltersUpdate(newFilters) {
+  Object.assign(currentFilters, newFilters)
 }
 
 function handleSearch() {
@@ -196,14 +237,21 @@ async function handleSaveTemplate(id) {
 }
 
 async function handleDeleteWork(id) {
-  try {
-    await deleteGalleryWork(id)
-    workList.value = workList.value.filter(w => w.id !== id)
-    totalCount.value = Math.max(0, totalCount.value - 1)
-    selectedItem.value = null
-  } catch (e) {
-    alert(`删除失败: ${e.response?.data?.detail || e.message}`)
-  }
+  showConfirm(
+    '删除作品',
+    '确定要永久删除这份作品记录吗？相关图片文件也将被一并清理，此操作不可撤销。',
+    true,
+    async () => {
+      try {
+        await deleteGalleryWork(id)
+        workList.value = workList.value.filter(w => w.id !== id)
+        totalCount.value = Math.max(0, totalCount.value - 1)
+        selectedItem.value = null
+      } catch (e) {
+        alert(`删除失败: ${e.response?.data?.detail || e.message}`)
+      }
+    }
+  )
 }
 
 function remixWork(item) {
@@ -226,15 +274,22 @@ function toggleItemSelection(id) {
 
 async function handleBatchDelete() {
   if (!selectedIds.value.length) return
-  if (!confirm(`确定要删除选中的 ${selectedIds.value.length} 项作品吗？`)) return
-  try {
-    const result = await batchDeleteWorks(selectedIds.value)
-    workList.value = workList.value.filter(w => !selectedIds.value.includes(w.id))
-    totalCount.value = Math.max(0, totalCount.value - result.deleted_count)
-    selectedIds.value = []
-  } catch (e) {
-    alert(`批量删除失败: ${e.response?.data?.detail || e.message}`)
-  }
+  
+  showConfirm(
+    '批量删除素材',
+    `确定要彻底删除选中的 ${selectedIds.value.length} 项作品吗？此操作不可撤销。`,
+    true,
+    async () => {
+      try {
+        const result = await batchDeleteWorks(selectedIds.value)
+        workList.value = workList.value.filter(w => !selectedIds.value.includes(w.id))
+        totalCount.value = Math.max(0, totalCount.value - result.deleted_count)
+        selectedIds.value = []
+      } catch (e) {
+        alert(`批量删除失败: ${e.response?.data?.detail || e.message}`)
+      }
+    }
+  )
 }
 
 async function handleBatchTag(tags) {

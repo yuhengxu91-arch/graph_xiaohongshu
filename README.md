@@ -1,43 +1,43 @@
 # 🚀 AI 内容运营助手
 
 基于 **LangGraph 1.0+** / **FastAPI** / **Vue 3** 构建的全链路内容创作平台。
-涵盖 AI 选题 → 文章撰写 → 配图生成 → **AI 海报生成** → **多平台内容适配**。
+涵盖 AI 选题 → 文章撰写 → 配图生成 → **AI 海报生成** → **作品库管理** → **多平台内容适配** → **内容日历规划**。
 
 ---
 
 ## ✨ 功能全景
 
-### 📝 内容工作流（Phase 0）
+### 📝 内容工作流
 | 功能 | 说明 |
 |------|------|
 | AI 选题生成 | 根据主题方向自动生成候选选题，支持结构化展现 |
 | AI 文章撰写 | 根据选定选题生成长文草稿，支持流式输出 |
-| 沉浸式 UI | **新版设计**：单列居中布局，配备浮动“状态胶囊”切换器 |
-| 抽屉控制台 | **新版设计**：一键滑出深色控制台，集成聚合后的执行日志与节点性能指标 |
+| 沉浸式 UI | 单列居中布局，配备浮动"状态胶囊"切换器 |
+| 抽屉控制台 | 一键滑出深色控制台，集成聚合后的执行日志与节点性能指标 |
 | 状态持久化 | PostgreSQL + LangGraph Checkpointer |
 
-### 🎨 AI 海报生成（Phase 1 – Phase 4）
+### 🎨 AI 海报生成
 
-#### Phase 1 · 基础生成
+#### 基础生成
 | 模式 | 说明 |
 |------|------|
 | 🎯 自定义生成 | 输入提示词 + 风格标签 + 色调偏好，AI 直出海报 |
-| 📋 模板生成 | 选择预置模板、填写文案槽位，AI 基于约束生成 |
+| 📋 模板生成 | 支持系统预置模板与个人模板，填写文案槽位，AI 基于约束生成 |
 
-#### Phase 2 · 图片编辑
+#### 图片编辑
 | 模式 | 说明 |
 |------|------|
 | ✏️ 以图改图 | 上传原图 + 编辑指令，AI 局部修改 |
 | 🎭 风格迁移 | 上传原图 + 目标风格标签，支持 light/medium/strong 三档强度 |
 
-#### Phase 3 · 批量与系列
+#### 批量与系列
 | 模式 | 说明 |
 |------|------|
 | 📦 批量生成 | 多组提示词并发生成，支持 CSV 导入 |
 | 🔗 系列一致性 | 系列模式下首图锚定风格，后续图自动保持一致 |
 | 📡 SSE 进度流 | 实时推送批量任务进度 |
 
-#### Phase 4 · 精细化编辑
+#### 精细化编辑
 | 模式 | 说明 |
 |------|------|
 | 🖌️ 局部重绘 (Inpaint) | Canvas 涂抹遮罩 → AI 定向替换选区内容 |
@@ -45,7 +45,25 @@
 | 📐 尺寸适配 (Adapt) | 智能裁剪 / AI 扩图 两种策略切换 |
 | 📦 全平台导出 (Export All) | 一键并发适配 5 大平台比例 |
 
-### 🌐 多平台内容适配（Phase 5）
+### 🖼️ 作品库 & 素材中心
+| 功能 | 说明 |
+|------|------|
+| 分页浏览 | 瀑布流展示所有 AI 生成作品，支持无限滚动加载 |
+| 多维筛选 | 按模式、收藏状态、标签、关键词检索 |
+| 批量操作 | 批量选中 → 批量打标签 / 批量删除，配备高颜值确认弹窗 |
+| 作品详情 | 高清预览 + Prompt 回溯 + 风格参数查看 |
+| 存为模板 | 将成功作品一键保存为个人模板，沉淀创作资产 |
+| 收藏管理 | 收藏 / 取消收藏快速标记 |
+
+### 📋 模板中心
+| 功能 | 说明 |
+|------|------|
+| 系统模板 | 预置 6 大专业模板（小红书封面、知识干货、活动促销等） |
+| 个人模板 | 用户自建模板，自定义 Prompt 模板 + 文案槽位 + 色调选项 |
+| Fork 系统模板 | 将系统模板复制为个人副本，自由修改 |
+| 模板编辑器 | 可视化定义 AI Prompt 模板，支持 `{vars}` 变量语法 |
+
+### 🌐 多平台内容适配
 | 功能 | 说明 |
 |------|------|
 | 多平台改写 | 一键将文章改写为小红书 / 抖音 / 微信公众号 / B站 / 微博风格 |
@@ -53,6 +71,30 @@
 | 手机预览模拟 | 实时预览各平台 Feed 流样式（含手机壳 UI） |
 | 智能标签推荐 | AI 根据文章内容为每个平台推荐热门标签 |
 | 一键复制导出 | 复制文案+标签，快速粘贴到各平台发布 |
+
+### 📅 内容日历
+| 功能 | 说明 |
+|------|------|
+| 日历视图 | 可视化展示内容排期，支持按月切换 |
+| AI 排期建议 | 结合热点日历，AI 自动生成发布计划 |
+| 事件管理 | 创建 / 编辑 / 删除内容事件 |
+| 热点追踪 | 内置热点数据库，自动提示即将到来的营销节点 |
+| 一键创作 | 从排期事件直接跳转生成文章/海报 |
+
+### 🏷️ 品牌包
+| 功能 | 说明 |
+|------|------|
+| 品牌设置 | 品牌名称、Slogan、调性描述、核心色等全局品牌参数 |
+| Logo 上传 | 上传品牌 Logo，关联到海报生成 |
+| 风格规范 | 定义品牌设计规范，AI 生成时自动遵循 |
+
+### 👤 个人中心
+| 功能 | 说明 |
+|------|------|
+| 用户资料 | 头像上传、昵称修改、密码修改 |
+| 创作统计 | 作品数、模板数、生成次数等数据概览 |
+| 引擎偏好 | 可切换 AI 图片生成引擎（Gemini / Doubao / 即梦） |
+| 偏好设置 | 默认风格、色调等个性化配置 |
 
 ---
 
@@ -63,10 +105,11 @@
 | 后端框架 | **FastAPI** (Python 3.10+) |
 | 工作流引擎 | **LangGraph 1.0+** |
 | 数据库 | **PostgreSQL** + SQLAlchemy (async) |
-| AI 图片 | **Gemini API** (generateContent + IMAGE modality) |
+| AI 图片 | **Gemini API** / **火山引擎 Doubao** / **即梦** (多引擎切换) |
 | AI 文案 | 火山引擎 Doubao / 通用 LLM |
 | 前端框架 | **Vue 3** + Vite |
-| 样式 | Vanilla CSS (暗色主题) |
+| 样式 | **TailwindCSS** (现代 UI 组件体系) |
+| 认证 | JWT Token 认证体系 |
 
 ---
 
@@ -93,12 +136,12 @@ psql -U postgres -c "CREATE DATABASE langgraph_db;"
 #### 2. 后端
 
 ```bash
-python -m venv app/venv
+python -m venv .venv
 
 # Windows
-call app\venv\Scripts\activate.bat
+call .venv\Scripts\activate.bat
 # Linux / Mac
-source app/venv/bin/activate
+source .venv/bin/activate
 
 pip install -r requirements.txt
 ```
@@ -108,9 +151,20 @@ pip install -r requirements.txt
 ```env
 DATABASE_URL=postgresql+asyncpg://postgres:your_password@localhost:5432/aicontent
 POSTGRES_URI=postgresql://postgres:your_password@localhost:5432/aicontent
+
+# AI 图片引擎配置（支持多代理）
+IMAGE_PROVIDER=gemini
 IMAGE_API_KEY=your_gemini_api_key
-IMAGE_API_BASE_URL=https://generativelanguage.googleapis.com
-IMAGE_MODEL=gemini-2.0-flash-exp-image-generation
+IMAGE_BASE_URL=https://generativelanguage.googleapis.com
+IMAGE_MODEL=gemini-3-pro-image-preview
+
+# Gemini 代理 2（可选）
+IMAGE_API_KEY_CH=your_changhuai_key
+IMAGE_BASE_URL_CH=https://www.changhuai.vip
+IMAGE_MODEL_CH=gemini-3-pro-image-preview
+
+# LLM 配置
+ARK_API_KEY=your_ark_api_key
 ```
 
 #### 4. 启动后端
@@ -153,8 +207,9 @@ stop.bat
 | GET | `/templates/{index}` | 获取单个模板详情 |
 | GET | `/style-tags` | 获取风格标签列表 |
 | GET | `/aspect-ratios` | 获取支持的输出尺寸 |
+| POST | `/generate-prompt` | 仅生成提示词（不生成图片） |
 | POST | `/generate/custom` | 自定义生成 |
-| POST | `/generate/template` | 模板生成 |
+| POST | `/generate/template` | 模板生成（支持系统/个人模板） |
 | POST | `/generate/edit` | 以图改图 |
 | POST | `/generate/style-transfer` | 风格迁移 |
 | POST | `/inpaint` | 局部重绘 |
@@ -172,6 +227,31 @@ stop.bat
 | GET | `/{task_id}/download` | 下载 ZIP 结果 |
 | POST | `/{task_id}/retry` | 重试失败项 |
 
+### 作品库 `/api/v1/gallery`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/list` | 分页获取作品列表 |
+| GET | `/search` | 搜索作品 |
+| GET | `/filters` | 获取筛选项 |
+| GET | `/{work_id}` | 获取作品详情 |
+| PUT | `/{work_id}` | 更新作品信息 |
+| DELETE | `/{work_id}` | 删除作品 |
+| POST | `/{work_id}/favorite` | 切换收藏状态 |
+| POST | `/{work_id}/save-template` | 存为个人模板 |
+| POST | `/batch-delete` | 批量删除 |
+| POST | `/batch-tag` | 批量打标签 |
+
+### 模板管理 `/api/v1/templates`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/list` | 获取模板列表（系统 + 个人） |
+| POST | `/create` | 新建个人模板 |
+| PUT | `/{template_id}` | 编辑个人模板 |
+| DELETE | `/{template_id}` | 删除个人模板 |
+| POST | `/{template_id}/duplicate` | Fork 系统模板为个人模板 |
+
 ### 内容工作流 `/api/v1/workflow`
 
 | 方法 | 路径 | 说明 |
@@ -185,12 +265,47 @@ stop.bat
 | 方法 | 路径 | 说明 |
 |------|------|------|
 | GET | `/rules` | 获取 5 大平台规则配置 |
-| POST | `/adapt` | 单平台改写（传入原文+平台 ID） |
+| POST | `/adapt` | 单平台改写 |
 | POST | `/adapt-all` | 一键全平台并发改写 |
 | GET | `/variants/{thread_id}` | 获取某篇文章的所有平台版本 |
 | GET | `/variant/{variant_id}` | 查询单个改写详情 |
 | PUT | `/variant/{variant_id}` | 编辑改写版本 |
 | DELETE | `/variant/{variant_id}` | 删除改写版本 |
+
+### 内容日历 `/api/v1/calendar`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/events` | 获取日历事件列表 |
+| POST | `/events` | 创建事件 |
+| PUT | `/events/{event_id}` | 更新事件 |
+| DELETE | `/events/{event_id}` | 删除事件 |
+| POST | `/generate-plan` | AI 生成排期计划 |
+| GET | `/plans` | 获取排期计划列表 |
+| GET | `/hotspots` | 获取热点日历 |
+| GET | `/hotspots/upcoming` | 获取即将到来的热点 |
+| POST | `/events/{event_id}/create-content` | 从事件创建内容 |
+
+### 品牌包 `/api/v1/brand`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/me` | 获取当前品牌包 |
+| PUT | `/me` | 创建或更新品牌包 |
+| POST | `/me/logo` | 上传品牌 Logo |
+| DELETE | `/me` | 重置品牌包 |
+
+### 个人中心 `/api/v1/profile`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| GET | `/me` | 获取用户完整资料 |
+| PUT | `/me` | 更新个人资料 |
+| POST | `/avatar` | 上传头像 |
+| PUT | `/password` | 修改密码 |
+| GET | `/stats` | 获取创作统计数据 |
+| GET | `/preferences` | 获取偏好设置 |
+| PUT | `/preferences` | 更新偏好设置 |
 
 ---
 
@@ -202,41 +317,75 @@ graph_xiaohongshu/
 │   ├── api/v1/
 │   │   ├── poster.py                 # 海报生成 API
 │   │   ├── batch.py                  # 批量生成 API（含 SSE）
+│   │   ├── gallery.py                # 作品库 API
+│   │   ├── user_template.py          # 个人模板 CRUD API
 │   │   ├── platform.py               # 多平台适配 API
+│   │   ├── calendar.py               # 内容日历 API
+│   │   ├── brand.py                  # 品牌包 API
+│   │   ├── profile.py                # 个人中心 API
 │   │   ├── workflow.py               # 内容工作流 API
 │   │   ├── auth.py                   # 认证 API
 │   │   └── image.py                  # 通用图片 API
 │   ├── data/
+│   │   ├── poster_templates.json     # 预置海报模板配置
+│   │   ├── style_tags.json           # 风格标签数据
+│   │   ├── hotspot_calendar.py       # 热点日历数据
 │   │   └── platform_rules.py         # 5 大平台规则配置
 │   ├── services/
 │   │   ├── poster_service.py         # 海报生成核心逻辑
 │   │   ├── batch_service.py          # 批量 & 系列一致性逻辑
+│   │   ├── gallery_service.py        # 作品库管理服务
+│   │   ├── template_service.py       # 模板 CRUD 服务
 │   │   ├── platform_adapter_service.py # 多平台文案改写服务
+│   │   ├── calendar_service.py       # 日历事件管理服务
+│   │   ├── calendar_planner_service.py # AI 排期规划服务
+│   │   ├── brand_service.py          # 品牌包管理服务
+│   │   ├── profile_service.py        # 用户资料 & 偏好服务
 │   │   ├── llm_service.py            # LLM 服务封装
-│   │   └── image_service.py          # 图片生成服务
+│   │   └── image_service.py          # 图片生成服务（多引擎）
+│   ├── models/
+│   │   ├── poster.py                 # 海报生成 / 模板 / 风格标签模型
+│   │   ├── batch_task.py             # 批量任务模型
+│   │   ├── platform_variant.py       # 平台改写版本模型
+│   │   ├── calendar.py               # 日历事件模型
+│   │   ├── brand.py                  # 品牌包模型
+│   │   └── user.py                   # 用户模型
 │   ├── graph/                        # LangGraph 工作流
-│   ├── models/                       # SQLAlchemy ORM
 │   ├── core/                         # 配置 & 数据库
+│   ├── dependencies/                 # 认证依赖注入
 │   └── main.py                       # FastAPI 入口
 │
-├── frontend/                         # 前端 Vue 3
+├── frontend/                         # 前端 Vue 3 + TailwindCSS
 │   └── src/
 │       ├── App.vue                   # 路由壳组件
-│       ├── MainApp.vue               # 主应用页面（基于响应式侧边栏与动态 Flex 布局）
-│       ├── WorkflowPage.vue          # 内容工作流主页（沉浸式布局 + 抽屉控制台）
-│       ├── PosterPage.vue            # 海报生成主页
+│       ├── MainApp.vue               # 主应用页面（侧边栏 + 动态布局）
+│       ├── WorkflowPage.vue          # 内容工作流主页
+│       ├── PosterPage.vue            # 海报生成主页（7 大面板）
+│       ├── GalleryPage.vue           # 作品库 & 素材中心
+│       ├── TemplateCenterPage.vue    # 模板中心（系统 + 个人模板）
 │       ├── PlatformPage.vue          # 多平台适配主页
+│       ├── CalendarPage.vue          # 内容日历主页
 │       ├── BrandPage.vue             # 品牌包设置页
-│       ├── components/workflow/      # 工作流子组件（StreamLogPanel 等）
-│       ├── components/poster/        # 海报相关子组件（含批量生成优化）
-│       ├── components/platform/      # 平台适配子组件
-│       │   ├── PlatformTabs.vue      # 平台选项卡
-│       │   ├── PlatformPreview.vue   # 手机预览模拟器
-│       │   ├── ContentEditor.vue     # 文案编辑器
-│       │   └── TagSuggestion.vue     # 标签推荐
+│       ├── ProfilePage.vue           # 个人中心
+│       ├── components/
+│       │   ├── common/               # 通用组件（ConfirmModal 等）
+│       │   ├── poster/               # 海报相关子组件（含 7 大面板）
+│       │   ├── gallery/              # 作品库子组件（Grid/Detail/Filter/BatchToolbar）
+│       │   ├── template/             # 模板子组件（Preview/Editor）
+│       │   ├── platform/             # 平台适配子组件
+│       │   ├── calendar/             # 日历子组件
+│       │   ├── brand/                # 品牌包子组件
+│       │   ├── profile/              # 个人中心子组件
+│       │   ├── workflow/             # 工作流子组件
+│       │   └── layout/               # 布局组件（侧边栏等）
 │       ├── router.js                 # Vue Router 路由配置
-│       └── api.js                    # API 客户端
+│       ├── api.js                    # API 客户端（统一封装）
+│       └── style.css                 # 全局样式
 │
+├── scripts/                          # 工具脚本
+├── static/                           # 静态资源 & 生成图片
+├── Dockerfile                        # Docker 容器化部署
+├── DEPLOYMENT.md                     # 部署文档
 ├── start.bat                         # 一键启动（Windows）
 ├── stop.bat                          # 一键停止（Windows）
 ├── requirements.txt
@@ -249,9 +398,10 @@ graph_xiaohongshu/
 ## ⚠️ 注意事项
 
 1. **数据库**: 确保 PostgreSQL 运行且可访问
-2. **Gemini API Key**: 在 `.env` 中配置 `IMAGE_API_KEY`
+2. **API Key**: 在 `.env` 中配置对应引擎的 API Key（Gemini / Doubao / 即梦）
 3. **图片存储**: 生成的海报保存在 `static/images/posters/`，需确保目录可写
 4. **并发控制**: 批量生成使用 `Semaphore(3)` 限流；全平台导出使用 `Semaphore(2)` 限流
+5. **多引擎切换**: 用户可在个人中心设置 AI 图片引擎偏好，支持 Gemini（多代理）、Doubao、即梦
 
 ## 📄 License
 

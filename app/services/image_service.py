@@ -46,15 +46,30 @@ class ImageService:
     ]
 
     def __init__(self):
+        self.provider = os.getenv("IMAGE_PROVIDER", "gemini").lower()
+
+        # Gemini 代理 1（xunruijie）
         self.api_key = os.getenv("IMAGE_API_KEY", "")
-        self.base_url = os.getenv("IMAGE_BASE_URL", "https://cn-beijing.yuannengai.com")
+        self.base_url = os.getenv("IMAGE_BASE_URL", "https://api.xunruijie.com")
         self.model = os.getenv("IMAGE_MODEL", "gemini-3-pro-image-preview")
-        
+
+        # Gemini 代理 2（changhuai）
+        self.api_key_ch = os.getenv("IMAGE_API_KEY_CH", "")
+        self.base_url_ch = os.getenv("IMAGE_BASE_URL_CH", "https://www.changhuai.vip")
+        self.model_ch = os.getenv("IMAGE_MODEL_CH", "gemini-3-pro-image-preview")
+
         self.image_dir = Path("static/images/generated")
         self.image_dir.mkdir(parents=True, exist_ok=True)
 
-        if not self.api_key:
-            raise ValueError("IMAGE_API_KEY 未配置")
+        active_key = os.getenv("JIMENG_ACCESS_KEY", "") if self.provider == "jimeng" else self.api_key
+        if not active_key:
+            print(f"[ImageService] 警告: API Key 未配置（当前引擎: {self.provider}），图片生成功能不可用")
+
+    def _get_effective_provider(self, provider_override: Optional[str] = None) -> str:
+        """获取实际使用的引擎，支持用户偏好覆盖"""
+        if provider_override and provider_override != "system":
+            return provider_override
+        return self.provider
 
     def _build_api_url(self) -> str:
         return f"{self.base_url}/v1beta/models/{self.model}:generateContent"
@@ -71,18 +86,88 @@ class ImageService:
         
         return f"/static/images/generated/{filename}"
 
-    async def _call_gemini_api(self, prompt: str) -> Optional[str]:
+    async def _call_image_api(self, prompt: str, provider_override: Optional[str] = None) -> Optional[str]:
+        """根据 provider 分派到对应 API，支持动态覆盖"""
+        effective = self._get_effective_provider(provider_override)
+        if effective == "doubao":
+            return await self._call_doubao_image_api(prompt)
+        if effective == "jimeng":
+            return await self._call_jimeng_api(prompt)
+        if effective == "gemini_ch":
+            return await self._call_gemini_api(prompt, use_changhuai=True)
+        return await self._call_gemini_api(prompt)
+
+    async def _call_doubao_image_api(self, prompt: str) -> Optional[str]:
+        """调用火山方舟 doubao-seedream 图片生成 API"""
+        import os as _os
+        llm_api_key = _os.getenv("LLM_API_KEY", "")
+        llm_base_url = _os.getenv("LLM_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
+        model = _os.getenv("DOUBAO_IMAGE_MODEL", "doubao-seedream-3-0-t2i-250415")
+
+        if not llm_api_key:
+            print("[ImageService] LLM_API_KEY 未配置")
+            return None
+
+        url = f"{llm_base_url}/images/generations"
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "response_format": "url",
+            "size": "2048x2048",
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {llm_api_key}",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                result = response.json()
+                data_list = result.get("data", [])
+                if data_list:
+                    item = data_list[0]
+                    if item.get("b64_json"):
+                        return item["b64_json"]
+                    if item.get("url"):
+                        img_resp = await client.get(item["url"], timeout=60.0)
+                        img_resp.raise_for_status()
+                        return base64.b64encode(img_resp.content).decode("utf-8")
+
+                print(f"[ImageService] doubao 生图无图片: {str(result)[:200]}")
+                return None
+        except httpx.HTTPStatusError as e:
+            print(f"[ImageService] doubao 生图错误: {e.response.status_code} {e.response.text[:200]}")
+            return None
+        except Exception as e:
+            print(f"[ImageService] doubao 生图异常: {e}")
+            return None
+
+    async def _call_gemini_api(self, prompt: str, use_changhuai: bool = False) -> Optional[str]:
         """调用 Gemini 图片生成 API"""
-        url = self._build_api_url()
+        if use_changhuai:
+            api_key = self.api_key_ch
+            base_url = self.base_url_ch
+            model = self.model_ch
+            tag = "Gemini-CH"
+        else:
+            api_key = self.api_key
+            base_url = self.base_url
+            model = self.model
+            tag = "Gemini"
+
+        url = f"{base_url}/v1beta/models/{model}:generateContent"
+        print(f"[ImageService] {tag} 请求 URL: {url}")
+        print(f"[ImageService] {tag} 使用模型: {model}")
         
         payload = {
             "contents": [{"parts": [{"text": prompt}]}],
             "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]}
         }
-        
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self.api_key}"
+            "Authorization": f"Bearer {api_key}"
         }
         
         try:
@@ -96,28 +181,70 @@ class ImageService:
                         if "inlineData" in part:
                             return part["inlineData"]["data"]
                 
-                print(f"[ImageService] API 响应中未找到图片数据")
+                print(f"[ImageService] {tag} 响应中未找到图片数据")
                 return None
                 
         except httpx.HTTPStatusError as e:
-            print(f"[ImageService] HTTP 错误: {e.response.status_code}")
+            print(f"[ImageService] {tag} HTTP 错误: {e.response.status_code}")
             return None
         except Exception as e:
-            print(f"[ImageService] 请求异常: {e}")
+            print(f"[ImageService] {tag} 请求异常: {e}")
+            return None
+
+    async def _call_jimeng_api(self, prompt: str) -> Optional[str]:
+        """调用火山引擎即梦图片生成 API"""
+        import os
+        from app.services._volcengine_sign import volcengine_signed_request
+
+        ak = os.getenv("JIMENG_ACCESS_KEY", "")
+        sk = os.getenv("JIMENG_SECRET_KEY", "")
+        if not ak or not sk:
+            print("[ImageService] 即梦 AK/SK 未配置")
+            return None
+
+        body_params = {
+            "req_key": "high_aes_general_v21_L",
+            "prompt": prompt,
+            "width": 1024,
+            "height": 1024,
+            "use_pre_llm": True,
+            "use_sr": True,
+            "return_url": True,
+            "logo_info": {"add_logo": False},
+        }
+
+        try:
+            result = await volcengine_signed_request(ak, sk, body_params)
+
+            if result.get("code") == 10000:
+                image_urls = result.get("data", {}).get("image_urls", [])
+                if image_urls:
+                    async with httpx.AsyncClient(timeout=60.0) as client:
+                        img_resp = await client.get(image_urls[0])
+                        img_resp.raise_for_status()
+                        return base64.b64encode(img_resp.content).decode("utf-8")
+
+            print(f"[ImageService] 即梦返回错误: code={result.get('code')}, msg={result.get('message', '')}")
+            return None
+
+        except Exception as e:
+            print(f"[ImageService] 即梦请求异常: {e}")
             return None
 
     async def generate_single_image(
         self,
         prompt: str,
         optimize_for_xhs: bool = True,
+        provider_override: Optional[str] = None,
     ) -> Optional[str]:
         """生成单张图片（失败时使用备用提示词重试一次）"""
         current_prompt = self.XHS_STYLE_PROMPT.format(content=prompt) if optimize_for_xhs else prompt
         
-        print(f"[ImageService] 生成图片: {prompt[:50]}...")
+        effective = self._get_effective_provider(provider_override)
+        print(f"[ImageService] 生成图片 (引擎={effective}): {prompt[:50]}...")
         
         # 首次尝试
-        image_base64 = await self._call_gemini_api(current_prompt)
+        image_base64 = await self._call_image_api(current_prompt, provider_override=provider_override)
         if image_base64:
             image_path = self._save_image(image_base64)
             print(f"[ImageService] 图片生成成功: {image_path}")
@@ -128,7 +255,7 @@ class ImageService:
         await asyncio.sleep(1)
         
         fallback_prompt = random.choice(self.FALLBACK_PROMPTS)
-        image_base64 = await self._call_gemini_api(fallback_prompt)
+        image_base64 = await self._call_image_api(fallback_prompt, provider_override=provider_override)
         if image_base64:
             image_path = self._save_image(image_base64)
             print(f"[ImageService] 备用提示词成功: {image_path}")
@@ -141,13 +268,18 @@ class ImageService:
         self,
         visual_points: List[str],
         optimize_for_xhs: bool = True,
+        provider_override: Optional[str] = None,
     ) -> List[str]:
         """批量生成配图（并行）"""
         if not visual_points:
             return []
 
         tasks = [
-            self.generate_single_image(prompt=point, optimize_for_xhs=optimize_for_xhs)
+            self.generate_single_image(
+                prompt=point,
+                optimize_for_xhs=optimize_for_xhs,
+                provider_override=provider_override,
+            )
             for point in visual_points
         ]
         results = await asyncio.gather(*tasks)

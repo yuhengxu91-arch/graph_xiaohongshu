@@ -6,7 +6,8 @@
       <!-- 图片上传区 -->
       <ImageUploader
         v-if="!form.imageBase64"
-        @upload="handleUpload"
+        :modelValue="form.imageBase64"
+        @update:modelValue="handleUpload"
       />
 
       <!-- 画布编辑区 (含模式切换与提示词) -->

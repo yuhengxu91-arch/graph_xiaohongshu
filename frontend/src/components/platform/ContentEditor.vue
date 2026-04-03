@@ -93,6 +93,7 @@ watch(() => props.modelValue, (newVal) => {
 .editor-textarea {
   flex: 1;
   width: 100%;
+  min-height: 280px;
   padding: 16px;
   border: 1px solid #d9d9d9;
   border-radius: 8px;
@@ -102,6 +103,7 @@ watch(() => props.modelValue, (newVal) => {
   line-height: 1.6;
   resize: none;
   transition: all 0.3s;
+  box-sizing: border-box;
 }
 
 .editor-textarea:focus {

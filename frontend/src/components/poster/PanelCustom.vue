@@ -68,18 +68,56 @@
           </div>
         </div>
 
-        <!-- 生成按钮 -->
-        <div class="pt-4 border-t border-slate-50">
-          <button
-            class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold py-5 rounded-3xl shadow-2xl shadow-blue-600/30 transition-all flex items-center justify-center gap-3 group relative overflow-hidden"
-            :disabled="!form.prompt.trim() || generating"
-            @click="handleGenerate"
-          >
-            <span v-if="generating" class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
-            <span v-else class="text-xl transition-transform group-hover:scale-125 group-hover:rotate-12 duration-300">🎨</span>
-            <span class="text-lg tracking-wide">{{ generating ? 'AI 画家构思中...' : '开始生成海报' }}</span>
-            <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-shimmer" v-if="!generating"></div>
-          </button>
+        <!-- 生成按钮区 -->
+        <div class="pt-4 border-t border-slate-50 space-y-3">
+          <div class="flex gap-3">
+            <button
+              class="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold py-5 rounded-3xl shadow-2xl shadow-blue-600/30 transition-all flex items-center justify-center gap-3 group relative overflow-hidden"
+              :disabled="!form.prompt.trim() || generating"
+              @click="handleGenerate"
+            >
+              <span v-if="generating" class="w-5 h-5 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+              <span v-else class="text-xl transition-transform group-hover:scale-125 group-hover:rotate-12 duration-300">🎨</span>
+              <span class="text-lg tracking-wide">{{ generating ? 'AI 画家构思中...' : '开始生成海报' }}</span>
+              <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-shimmer" v-if="!generating"></div>
+            </button>
+            <button
+              class="px-6 bg-amber-500 hover:bg-amber-600 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-bold py-5 rounded-3xl shadow-lg shadow-amber-500/20 transition-all flex items-center justify-center gap-2 whitespace-nowrap"
+              :disabled="!form.prompt.trim() || generatingPrompt"
+              @click="handleGeneratePrompt"
+            >
+              <span v-if="generatingPrompt" class="w-4 h-4 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+              <span v-else>📝</span>
+              <span>生成提示词</span>
+            </button>
+          </div>
+
+          <!-- 提示词结果展示 -->
+          <div v-if="generatedPrompt" class="bg-amber-50 border border-amber-200 rounded-2xl p-5 space-y-3">
+            <div class="flex items-center justify-between">
+              <span class="text-sm font-bold text-amber-800 flex items-center gap-2">
+                📝 Prompt（可直接用于 Nano Banana Pro）
+              </span>
+              <div class="flex gap-2">
+                <button
+                  class="text-xs px-3 py-1.5 bg-amber-500 hover:bg-amber-600 text-white rounded-lg font-semibold transition-all"
+                  @click="copyPrompt"
+                >
+                  {{ copied ? '✅ 已复制' : '📋 复制' }}
+                </button>
+                <button
+                  class="text-xs px-3 py-1.5 bg-slate-200 hover:bg-slate-300 text-slate-600 rounded-lg font-semibold transition-all"
+                  @click="generatedPrompt = null"
+                >
+                  ✕ 关闭
+                </button>
+              </div>
+            </div>
+            <pre class="text-sm text-slate-700 whitespace-pre-wrap leading-relaxed bg-white rounded-xl p-4 border border-amber-100 select-all cursor-text">{{ generatedPrompt }}</pre>
+            <div class="text-xs text-amber-600">
+              尺寸：{{ promptMeta.width }}×{{ promptMeta.height }} ({{ promptMeta.aspect_ratio }})
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -89,6 +127,7 @@
 <script setup>
 import { ref } from 'vue'
 import RatioSelector from './RatioSelector.vue'
+import { generatePromptOnly } from '../../api.js'
 
 const props = defineProps({
   styleTags: { type: Array, default: () => [] },
@@ -105,6 +144,11 @@ const form = ref({
   colorTone: '',
 })
 
+const generatingPrompt = ref(false)
+const generatedPrompt = ref(null)
+const promptMeta = ref({})
+const copied = ref(false)
+
 function toggleStyle(name) {
   const idx = form.value.selectedStyles.indexOf(name)
   if (idx >= 0) {
@@ -114,19 +158,47 @@ function toggleStyle(name) {
   }
 }
 
-function getTagStyle(tag) {
-  const palette = tag.color_palette || []
-  if (palette.length >= 2) {
-    return {
-      '--tag-color-1': palette[0],
-      '--tag-color-2': palette[1],
-    }
-  }
-  return {}
-}
-
 function handleGenerate() {
   if (!form.value.prompt.trim() || props.generating) return
   emit('generate', { ...form.value })
+}
+
+async function handleGeneratePrompt() {
+  if (!form.value.prompt.trim() || generatingPrompt.value) return
+  generatingPrompt.value = true
+  copied.value = false
+  try {
+    const res = await generatePromptOnly({
+      prompt: form.value.prompt,
+      style_tags: form.value.selectedStyles.length > 0 ? form.value.selectedStyles : undefined,
+      aspect_ratio: form.value.aspectRatio,
+      color_tone: form.value.colorTone || undefined,
+    })
+    if (res.success) {
+      generatedPrompt.value = res.prompt
+      promptMeta.value = {
+        aspect_ratio: res.aspect_ratio,
+        width: res.width,
+        height: res.height,
+      }
+    } else {
+      generatedPrompt.value = `生成失败: ${res.error || '未知错误'}`
+      promptMeta.value = {}
+    }
+  } catch (e) {
+    console.error('生成提示词失败:', e)
+    generatedPrompt.value = `请求失败: ${e.message || '网络错误'}`
+    promptMeta.value = {}
+  } finally {
+    generatingPrompt.value = false
+  }
+}
+
+function copyPrompt() {
+  if (!generatedPrompt.value) return
+  navigator.clipboard.writeText(generatedPrompt.value).then(() => {
+    copied.value = true
+    setTimeout(() => { copied.value = false }, 2000)
+  })
 }
 </script>

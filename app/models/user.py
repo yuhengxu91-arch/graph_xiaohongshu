@@ -50,6 +50,9 @@ class UserPreference(Base):
     default_mode = Column(String(30), default="custom", comment="默认生成模式")
     auto_save_to_gallery = Column(Boolean, default=True, comment="自动保存到作品库")
 
+    # 图片生成引擎选择
+    image_provider = Column(String(20), nullable=True, comment="图片引擎: gemini/gemini_ch/doubao/jimeng，NULL=跟随系统")
+
     # API Key 管理（加密存储）
     custom_api_key = Column(String(255), nullable=True, comment="用户自定义 Gemini API Key")
 

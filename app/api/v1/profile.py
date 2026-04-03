@@ -44,6 +44,7 @@ class PreferencesUpdateRequest(BaseModel):
     default_mode: Optional[str] = None
     default_style_tag: Optional[str] = None
     auto_save_to_gallery: Optional[bool] = None
+    image_provider: Optional[str] = None
     custom_api_key: Optional[str] = None
 
 

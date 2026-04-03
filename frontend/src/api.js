@@ -361,6 +361,15 @@ export async function generateCustomPoster(data) {
 }
 
 /**
+ * 仅生成提示词（不生成图片），供 Nano Banana Pro 等外部工具使用
+ * @param {Object} data - { prompt, style_tags?, aspect_ratio?, color_tone? }
+ */
+export async function generatePromptOnly(data) {
+  const res = await api.post('/poster/generate-prompt', data)
+  return res.data
+}
+
+/**
  * 模板生成海报
  * @param {Object} data - { template_index, params, style_tag?, color_option?, aspect_ratio? }
  */
@@ -681,18 +690,13 @@ export async function getProfileStats() {
 }
 
 export async function getPreferences() {
-  await new Promise(r => setTimeout(r, 300))
-  return {
-    default_aspect_ratio: '3:4',
-    default_mode: 'custom',
-    auto_save: true,
-    custom_api_key: ''
-  }
+  const res = await api.get('/profile/preferences')
+  return res.data
 }
 
 export async function updatePreferences(data) {
-  await new Promise(r => setTimeout(r, 400))
-  return data
+  const res = await api.put('/profile/preferences', data)
+  return res.data
 }
 
 // ============== 多平台适配 API (Platform Adapter) ==============

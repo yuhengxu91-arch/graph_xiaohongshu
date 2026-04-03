@@ -485,7 +485,7 @@ function handleCopyContent() {
   display: flex;
   flex-direction: column;
   gap: 16px;
-  height: 100%;
+  flex: 1;
 }
 
 .title-input {
@@ -497,6 +497,8 @@ function handleCopyContent() {
 .editor-main {
   flex: 1;
   min-height: 300px;
+  display: flex;
+  flex-direction: column;
 }
 
 .editor-actions {

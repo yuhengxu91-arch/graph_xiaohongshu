@@ -10,7 +10,7 @@
           :class="activeTab === tab.id 
             ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20' 
             : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'"
-          @click="activeTab = tab.id"
+          @click="activeTab = tab.id; generatedResult = null"
         >
           <span>{{ tab.icon }}</span>
           <span>{{ tab.label }}</span>
@@ -66,6 +66,7 @@
 
 <script setup>
 import { ref, onMounted, defineAsyncComponent, computed } from 'vue'
+import { useRoute } from 'vue-router'
 
 // 静态引入共享、轻量的展示组件
 import ResultDisplay from './components/poster/ResultDisplay.vue'
@@ -94,8 +95,10 @@ import {
   getPosterAspectRatios,
 } from './api.js'
 
+const route = useRoute()
+
 // ============== 状态 ==============
-const activeTab = ref('batch')
+const activeTab = ref(route.query.tab || 'batch')
 const generating = ref(false)
 const generatedResult = ref(null)
 
@@ -293,12 +296,21 @@ function handleCustomGenerate(form) {
 }
 
 function handleTemplateGenerate(form) {
-  generateWithWrapper('template', {
-    template_index: form.template.index,
+  const payload = {
     params: form.params,
     color_option: form.colorOption || undefined,
     aspect_ratio: form.aspectRatio || undefined,
-  })
+  }
+
+  // 个人模板（数据库模板）: 传 template_id
+  if (form.template.id) {
+    payload.template_id = form.template.id
+  } else {
+    // 系统模板: 传 template_index
+    payload.template_index = form.template.index
+  }
+
+  generateWithWrapper('template', payload)
 }
 
 function handleEditGenerate(form) {
@@ -344,7 +356,7 @@ function handleAdaptGenerate(form) {
 }
 
 function handleStyleGenerate(form) {
-  generateWithWrapper('style_transfer', {
+  generateWithWrapper('style', {
     image_base64: form.imageBase64,
     style_tags: form.selectedStyles,
     strength: form.strength,

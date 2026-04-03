@@ -1,5 +1,5 @@
 <template>
-  <div class="flex-1 p-4 md:p-8 min-h-full bg-slate-50 w-full relative">
+  <div class="flex-1 min-h-full bg-slate-50 w-full relative flex">
     
     <!-- 消息提示 (Toast) -->
     <Transition name="fade">
@@ -10,6 +10,8 @@
       </div>
     </Transition>
 
+    <!-- 左侧：工作流主内容 -->
+    <div class="flex-1 p-4 md:p-8 overflow-y-auto min-w-0">
     <div class="max-w-4xl mx-auto flex flex-col gap-8 pb-24">
       <!-- 工作流进度条 -->
       <WorkflowSteps :currentStep="currentStep" />
@@ -90,6 +92,90 @@
         </div>
       </div>
     </div>
+    </div>
+
+    <!-- 右侧：创作历史面板 -->
+    <div class="w-72 border-l border-slate-200/80 bg-white shrink-0 hidden lg:flex flex-col">
+      <!-- 面板标题 -->
+      <div class="p-5 border-b border-slate-100 flex items-center justify-between shrink-0">
+        <div class="flex items-center gap-2">
+          <span class="text-lg">📚</span>
+          <h3 class="text-sm font-bold text-slate-800">创作历史</h3>
+          <span v-if="threadList.length" class="bg-slate-100 text-slate-500 text-[10px] font-bold px-1.5 py-0.5 rounded-full">{{ threadList.length }}</span>
+        </div>
+        <button 
+          @click="fetchThreadList"
+          class="text-slate-400 hover:text-blue-500 transition-colors p-1.5 rounded-lg hover:bg-blue-50"
+          title="刷新"
+        >
+          <svg xmlns="http://www.w3.org/2000/svg" class="w-4 h-4" :class="loadingThreads ? 'animate-spin' : ''" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 0 0-9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/><path d="M3 12a9 9 0 0 0 9 9 9.75 9.75 0 0 0 6.74-2.74L21 16"/><path d="M16 16h5v5"/></svg>
+        </button>
+      </div>
+
+      <!-- 列表区域 -->
+      <div class="flex-1 overflow-y-auto p-3 custom-scrollbar">
+        <!-- 加载态 -->
+        <div v-if="loadingThreads" class="space-y-2">
+          <div v-for="i in 4" :key="i" class="h-16 bg-slate-50 rounded-xl animate-pulse"></div>
+        </div>
+
+        <!-- 空状态 -->
+        <div v-else-if="threadList.length === 0" class="py-12 text-center">
+          <div class="text-slate-200 text-4xl mb-3">📝</div>
+          <p class="text-sm text-slate-400 font-medium">还没有创作记录</p>
+          <p class="text-xs text-slate-300 mt-1">在左侧输入主题开始创作</p>
+        </div>
+
+        <!-- 历史列表 -->
+        <div v-else class="space-y-1.5">
+          <div 
+            v-for="thread in threadList" 
+            :key="thread.thread_id"
+            @click="handleHistoryClick(thread.thread_id)"
+            class="group p-3 rounded-xl cursor-pointer transition-all relative"
+            :class="threadId === thread.thread_id 
+              ? 'bg-blue-50 border border-blue-200 shadow-sm' 
+              : 'hover:bg-slate-50 border border-transparent'"
+          >
+            <div class="flex items-start gap-2.5">
+              <!-- 状态指示器 -->
+              <div class="mt-1 shrink-0">
+                <span v-if="thread.is_completed" class="block w-2.5 h-2.5 rounded-full bg-emerald-400 ring-2 ring-emerald-100"></span>
+                <span v-else class="block w-2.5 h-2.5 rounded-full bg-amber-400 ring-2 ring-amber-100 animate-pulse"></span>
+              </div>
+
+              <!-- 内容 -->
+              <div class="flex-1 min-w-0">
+                <p class="text-[13px] font-semibold truncate leading-tight"
+                   :class="threadId === thread.thread_id ? 'text-blue-700' : 'text-slate-700'">
+                  {{ thread.selected_topic || thread.topic_direction || '未命名工作流' }}
+                </p>
+                <div class="flex items-center gap-1.5 mt-1.5">
+                  <span class="text-[10px] font-bold px-1.5 py-0.5 rounded-md"
+                    :class="thread.is_completed 
+                      ? 'bg-emerald-50 text-emerald-600' 
+                      : 'bg-amber-50 text-amber-600'">
+                    {{ thread.is_completed ? '✓ 完成' : '● 进行中' }}
+                  </span>
+                </div>
+                <p v-if="thread.topic_direction && thread.selected_topic" class="text-[11px] text-slate-400 truncate mt-1">
+                  {{ thread.topic_direction }}
+                </p>
+              </div>
+
+              <!-- 删除按钮 -->
+              <button 
+                @click.stop="handleHistoryDelete(thread.thread_id)"
+                class="opacity-0 group-hover:opacity-100 shrink-0 w-7 h-7 rounded-lg flex items-center justify-center text-slate-300 hover:text-red-500 hover:bg-red-50 transition-all"
+                title="删除"
+              >
+                <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h18"/><path d="M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6"/><path d="M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2"/></svg>
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
 
     <!-- 抽屉式侧边栏 (Console Drawer) -->
     <Transition name="drawer">
@@ -154,7 +240,7 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, onMounted } from 'vue'
 
 // 导入子组件
 import WorkflowSteps from './components/workflow/WorkflowSteps.vue'
@@ -171,7 +257,9 @@ import {
   streamStartWorkflow,
   streamSelectTopic,
   streamApproveArticle,
-  streamRejectArticle
+  streamRejectArticle,
+  getAllThreads,
+  deleteThread
 } from './api.js'
 
 const emit = defineEmits([
@@ -186,6 +274,8 @@ const loading = ref(false)
 const message = ref('')
 const messageType = ref('info')
 const isConsoleOpen = ref(false)
+const loadingThreads = ref(false)
+const threadList = ref([])
 
 // 工作流数据
 const threadId = ref('')
@@ -319,6 +409,7 @@ async function handleStart() {
         loading.value = false
         showMessage('选题已生成，请选择一个继续', 'success')
         emit('refresh-threads')
+        fetchThreadList()
       },
       onError: (errorMsg) => {
         addStreamLog('error', { message: errorMsg }, 'start')
@@ -493,6 +584,43 @@ function handleReset() {
   emit('new-workflow')
 }
 
+// ============== 创作历史 ==============
+async function fetchThreadList() {
+  loadingThreads.value = true
+  try {
+    const result = await getAllThreads()
+    threadList.value = result.threads || []
+  } catch (e) {
+    console.error('获取历史记录失败:', e)
+  } finally {
+    loadingThreads.value = false
+  }
+}
+
+function handleHistoryClick(targetThreadId) {
+  if (targetThreadId === threadId.value) return
+  switchThread(targetThreadId)
+}
+
+async function handleHistoryDelete(targetThreadId) {
+  if (!confirm('确定要删除这条历史记录吗？')) return
+  try {
+    await deleteThread(targetThreadId)
+    if (targetThreadId === threadId.value) {
+      resetWorkflow()
+    }
+    await fetchThreadList()
+    emit('refresh-threads')
+  } catch (e) {
+    showMessage(`删除失败: ${e.response?.data?.detail || e.message}`, 'error')
+  }
+}
+
+// 初始加载
+onMounted(() => {
+  fetchThreadList()
+})
+
 // 暴露给外部的方法
 function resetWorkflow() {
   currentStep.value = 0
@@ -610,4 +738,9 @@ defineExpose({
 
 .no-scrollbar::-webkit-scrollbar { display: none; }
 .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
+
+.custom-scrollbar::-webkit-scrollbar { width: 4px; }
+.custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+.custom-scrollbar::-webkit-scrollbar-thumb { background-color: transparent; border-radius: 20px; }
+.custom-scrollbar:hover::-webkit-scrollbar-thumb { background-color: #cbd5e1; }
 </style>

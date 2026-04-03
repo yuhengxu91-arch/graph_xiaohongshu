@@ -1,17 +1,17 @@
 <template>
   <header class="h-16 bg-white border-b border-slate-200 flex items-center justify-between px-8 shrink-0" data-purpose="main-header">
     <div class="flex-1 max-w-xl">
-      <div class="relative group">
-        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 group-focus-within:text-blue-500 transition-colors">
+      <div class="relative group cursor-pointer" @click="$emit('open-search')">
+        <span class="absolute inset-y-0 left-0 pl-3 flex items-center text-slate-400 group-hover:text-blue-500 transition-colors">
           <svg class="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z"></path>
           </svg>
         </span>
-        <input 
-          class="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-blue-500/20 focus:border-blue-500 focus:bg-white transition-all shadow-sm" 
-          placeholder="搜索工作流或内容..." 
-          type="text"
-        />
+        <div 
+          class="block w-full pl-10 pr-3 py-2 border border-slate-200 rounded-lg bg-slate-50 text-sm text-slate-400 group-hover:border-blue-300 group-hover:bg-white transition-all shadow-sm select-none"
+        >
+          搜索工作流或内容...
+        </div>
         <div class="absolute inset-y-0 right-0 pr-2 flex items-center">
           <span class="text-[10px] text-slate-400 font-medium px-2 py-0.5 border border-slate-200 rounded bg-white shadow-sm">⌘K</span>
         </div>
@@ -60,7 +60,7 @@ defineProps({
   activePage: { type: String, required: false }
 })
 
-defineEmits(['logout'])
+defineEmits(['logout', 'open-search'])
 
 function goToProfile() {
   router.push({ name: 'profile' })

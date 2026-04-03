@@ -201,6 +201,7 @@ class ProfileService:
                 "default_mode": "custom",
                 "default_style_tag": None,
                 "auto_save_to_gallery": True,
+                "image_provider": None,
                 "custom_api_key": "",
             }
         return self._serialize_prefs(pref)
@@ -220,7 +221,7 @@ class ProfileService:
         updatable = [
             "default_aspect_ratio", "default_mode",
             "default_style_tag", "auto_save_to_gallery",
-            "custom_api_key",
+            "image_provider", "custom_api_key",
         ]
         for field in updatable:
             if field in data:
@@ -251,8 +252,24 @@ class ProfileService:
             "default_mode": pref.default_mode,
             "default_style_tag": pref.default_style_tag,
             "auto_save_to_gallery": pref.auto_save_to_gallery,
+            "image_provider": pref.image_provider,
             "custom_api_key": "***" if pref.custom_api_key else "",
         }
+
+
+    # =====================================================
+    # 快捷查询（供其他模块调用）
+    # =====================================================
+    async def get_user_image_provider(
+        self, db: AsyncSession, *, user_id: UUID
+    ) -> Optional[str]:
+        """快速查询用户选择的图片生成引擎，None 表示跟随系统"""
+        stmt = select(UserPreference.image_provider).where(
+            UserPreference.user_id == user_id
+        )
+        result = await db.execute(stmt)
+        row = result.scalar_one_or_none()
+        return row  # None = 跟随系统
 
 
 # 模块级单例

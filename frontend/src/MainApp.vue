@@ -27,6 +27,7 @@
       <AppHeader 
         :currentUsername="currentUsername"
         @logout="handleLogout"
+        @open-search="isSearchOpen = true"
       />
 
       <!-- Dashboard 容器 -->
@@ -48,6 +49,13 @@
         </router-view>
       </div>
     </main>
+
+    <!-- 全局搜索弹窗 -->
+    <SearchModal 
+      :is-open="isSearchOpen"
+      @close="isSearchOpen = false"
+      @switch-thread="handleSwitchThread"
+    />
   </div>
 </template>
 
@@ -59,6 +67,7 @@ import { useRoute, useRouter } from 'vue-router'
 import AuthPage from './components/layout/AuthPage.vue'
 import AppSidebar from './components/layout/AppSidebar.vue'
 import AppHeader from './components/layout/AppHeader.vue'
+import SearchModal from './components/common/SearchModal.vue'
 
 import {
   logout,
@@ -130,10 +139,12 @@ function onAuthLogout() {
 onMounted(() => {
   checkAuth()
   window.addEventListener('auth:logout', onAuthLogout)
+  document.addEventListener('keydown', handleGlobalKeydown)
 })
 
 onUnmounted(() => {
   window.removeEventListener('auth:logout', onAuthLogout)
+  document.removeEventListener('keydown', handleGlobalKeydown)
 })
 
 // ============== 侧边栏与工作流状态 ==============
@@ -141,6 +152,15 @@ const sidebarOpen = ref(true)
 const loadingThreads = ref(false)
 const threadList = ref([])
 const currentThreadId = ref('')
+const isSearchOpen = ref(false)
+
+// 全局 ⌘K 快捷键
+function handleGlobalKeydown(e) {
+  if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+    e.preventDefault()
+    isSearchOpen.value = !isSearchOpen.value
+  }
+}
 
 // 登录后获取历史记录
 watch(isLoggedIn, (newVal) => {

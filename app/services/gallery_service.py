@@ -507,9 +507,16 @@ class GalleryService:
             query = query.where(PosterGeneration.is_template == is_template)
 
         if tags:
-            # TODO: 优化 PostgreSQL JSONB 搜索逻辑
-            # 目前暂时跳过 tags 的 ilike 过滤，以解决 500 错误
-            pass
+            # 使用 cast + ilike 对 JSONB 数组进行文本匹配
+            tag_conditions = []
+            for tag in tags:
+                tag = tag.strip()
+                if tag:
+                    tag_conditions.append(
+                        cast(PosterGeneration.tags, String).ilike(f"%{tag}%")
+                    )
+            if tag_conditions:
+                query = query.where(or_(*tag_conditions))
 
         if keyword:
             pattern = f"%{keyword.strip()}%"
