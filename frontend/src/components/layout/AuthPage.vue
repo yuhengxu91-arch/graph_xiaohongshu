@@ -78,25 +78,7 @@
           </button>
         </form>
         
-        <!-- Social Login Divider -->
-        <div class="relative my-8" v-if="isLoginMode">
-          <div class="absolute inset-0 flex items-center">
-            <div class="w-full border-t border-slate-200"></div>
-          </div>
-          <div class="relative flex justify-center text-sm">
-            <span class="px-4 bg-white text-slate-400">免密登录体验版</span>
-          </div>
-        </div>
-        
-        <!-- Action Buttons -->
-        <div class="grid grid-cols-2 gap-4" v-if="isLoginMode">
-          <button @click="fillTestAccount('newuser', 'test123')" class="flex items-center justify-center gap-2 py-2.5 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors text-sm font-medium text-slate-700">
-            <span class="text-emerald-500">✅</span> 新手体验
-          </button>
-          <button @click="fillTestAccount('zhangsan', 'test123')" class="flex items-center justify-center gap-2 py-2.5 border border-slate-200 rounded-xl hover:bg-slate-50 transition-colors text-sm font-medium text-slate-700">
-            <span class="text-blue-500">👨‍💻</span> 开发者账户
-          </button>
-        </div>
+
 
       </div>
 
@@ -148,9 +130,5 @@ async function handleAuth() {
   }
 }
 
-function fillTestAccount(username, password) {
-  authForm.value.username = username;
-  authForm.value.password = password;
-  handleAuth();
-}
+
 </script>

@@ -67,6 +67,22 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await init_db()
         app_logger.db_connected(database_url=settings.database_url.split("@")[-1])  # 不记录密码
         
+        # 初始化系统模板 Seed 数据
+        app_logger.info("Checking system templates seed data...")
+        try:
+            from scripts.seed_templates import seed_system_templates
+            from app.core.db import async_session_factory
+            async with async_session_factory() as seed_session:
+                inserted = await seed_system_templates(seed_session)
+                await seed_session.commit()
+                if inserted > 0:
+                    app_logger.info(f"Seeded {inserted} system templates")
+                    print(f"[Seed] Inserted {inserted} system templates")
+                else:
+                    app_logger.info("System templates already exist, skipping seed")
+        except Exception as e:
+            app_logger.warning(f"System template seed failed (non-critical): {e}")
+
         # 初始化 LangGraph Checkpointer
         app_logger.info("Initializing LangGraph Checkpointer...")
         await setup_checkpointer()

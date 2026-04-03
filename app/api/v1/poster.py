@@ -29,8 +29,7 @@ class CustomGenerateRequest(BaseModel):
 
 class TemplateGenerateRequest(BaseModel):
     """模板生成请求"""
-    template_index: Optional[int] = Field(None, description="系统模板索引（从0开始）", ge=0)
-    template_id: Optional[str] = Field(None, description="个人模板 ID（UUID）")
+    template_id: str = Field(..., description="模板 ID（UUID）")
     params: Dict[str, str] = Field(..., description="文案参数，如 {title: '...', subtitle: '...'}")
     style_tag: Optional[str] = Field(None, description="覆盖模板默认风格")
     color_option: Optional[str] = Field(None, description="色调选项")
@@ -247,37 +246,28 @@ async def generate_from_template(
     try:
         provider = await _get_user_provider(db, current_user)
 
-        # 个人模板（数据库）: 通过 template_id 查找
-        if req.template_id:
-            from app.services.template_service import template_service
-            from uuid import UUID as _UUID
-            tpl = await template_service.get_template(db, template_id=_UUID(req.template_id))
-            if not tpl:
-                return GenerateResponse(success=False, error=f"模板 {req.template_id} 不存在")
+        # 统一通过 template_id 从数据库查找（包含个人模板和系统模板）
+        from app.services.template_service import template_service
+        from uuid import UUID as _UUID
+        
+        tpl = await template_service.get_template(db, template_id=_UUID(req.template_id))
+        if not tpl:
+            return GenerateResponse(success=False, error=f"模板 {req.template_id} 不存在")
 
-            # 用数据库模板的 config 调用生成
-            result = await poster_service.generate_from_db_template(
-                template_config=tpl.config or {},
-                template_name=tpl.name,
-                template_style_tag=tpl.style_tag,
-                params=req.params,
-                style_tag=req.style_tag,
-                color_option=req.color_option,
-                aspect_ratio=req.aspect_ratio,
-                provider_override=provider,
-            )
-            # 使用次数 +1
-            await template_service.increment_use_count(db, template_id=tpl.id)
-        else:
-            # 系统模板: 通过 template_index 查找
-            result = await poster_service.generate_from_template(
-                template_index=req.template_index or 0,
-                params=req.params,
-                style_tag=req.style_tag,
-                color_option=req.color_option,
-                aspect_ratio=req.aspect_ratio,
-                provider_override=provider,
-            )
+        # 用数据库模板的 config 调用生成
+        result = await poster_service.generate_from_db_template(
+            template_config=tpl.config or {},
+            template_name=tpl.name,
+            template_style_tag=tpl.style_tag,
+            params=req.params,
+            style_tag=req.style_tag,
+            color_option=req.color_option,
+            aspect_ratio=req.aspect_ratio,
+            provider_override=provider,
+        )
+        
+        # 使用次数 +1
+        await template_service.increment_use_count(db, template_id=tpl.id)
 
         await _auto_save_generation(
             db=db,

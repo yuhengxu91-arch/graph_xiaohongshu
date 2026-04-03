@@ -2,42 +2,48 @@
   <div class="space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-500">
     <!-- 模板选择列表 -->
     <div v-if="!selectedTemplate" class="space-y-6">
-      <div class="flex items-center justify-between px-4">
+      <div class="flex flex-col md:flex-row md:items-center justify-between px-4 gap-4">
         <div>
           <h2 class="text-xl font-bold text-slate-800 tracking-tight">精选设计模板</h2>
           <p class="text-xs text-slate-400 mt-1 uppercase tracking-widest font-semibold">Premium Design Templates</p>
         </div>
+        
+        <!-- Tab 切换 -->
+        <div class="inline-flex p-1 bg-white border border-slate-200 rounded-2xl shadow-sm self-start">
+          <button 
+            v-for="tab in [{id: 'mine', label: '我的模板', icon: '👤'}, {id: 'system', label: '系统模板', icon: '🏢'}]" 
+            :key="tab.id"
+            @click="currentTab = tab.id"
+            :class="[
+              'flex items-center gap-1.5 px-4 py-1.5 rounded-xl text-xs font-bold transition-all duration-200',
+              currentTab === tab.id 
+                ? 'bg-blue-600 text-white shadow-md shadow-blue-100' 
+                : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'
+            ]"
+          >
+            <span>{{ tab.icon }}</span>
+            {{ tab.label }}
+          </button>
+        </div>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" v-if="templates.length > 0">
-        <div
-          v-for="tpl in templates"
-          :key="tpl.index"
+      <div class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6" v-if="filteredTemplates.length > 0">
+        <TemplatePreview
+          v-for="tpl in filteredTemplates"
+          :key="tpl.id"
+          :template="tpl"
+          :isSystem="currentTab === 'system'"
+          :selectionMode="true"
           @click="selectTemplate(tpl)"
-          class="group bg-white rounded-[2rem] border border-slate-100 shadow-sm hover:shadow-2xl hover:shadow-blue-900/5 hover:-translate-y-2 transition-all cursor-pointer overflow-hidden p-3"
-        >
-          <div class="aspect-[4/3] rounded-[1.5rem] relative overflow-hidden flex items-center justify-center p-6 border border-slate-50 transition-all group-hover:bg-slate-50" :style="getTemplateHeaderStyle(tpl)">
-            <!-- 玻璃拟态装饰 -->
-            <div class="absolute inset-0 bg-white/10 backdrop-blur-[2px]"></div>
-            <div class="relative z-10 w-full h-full border-4 border-white/40 rounded-xl shadow-lg flex items-center justify-center">
-               <span class="text-4xl filter drop-shadow-md">📋</span>
-            </div>
-            <div class="absolute top-4 left-4 inline-flex items-center px-3 py-1 bg-white/20 backdrop-blur-md border border-white/30 rounded-full text-[10px] font-black text-white uppercase tracking-wider">
-              {{ tpl.category }}
-            </div>
-          </div>
-          
-          <div class="p-5 space-y-3">
-            <div>
-              <h4 class="text-base font-black text-slate-800 tracking-tight transition-colors group-hover:text-blue-600">{{ tpl.name }}</h4>
-              <p class="text-xs text-slate-400 font-medium line-clamp-2 mt-1">{{ tpl.description }}</p>
-            </div>
-            <div class="flex items-center gap-2 pt-2 border-t border-slate-50">
-              <span class="px-2 py-0.5 bg-slate-100 text-slate-500 rounded-md text-[10px] font-bold">{{ tpl.style_tag }}</span>
-              <span class="px-2 py-0.5 bg-blue-50 text-blue-600 rounded-md text-[10px] font-bold">{{ tpl.default_aspect_ratio }}</span>
-            </div>
-          </div>
-        </div>
+          @use="selectTemplate(tpl)"
+          class="cursor-pointer"
+        />
+      </div>
+      
+      <!-- 空状态 -->
+      <div v-else-if="templates.length > 0" class="py-20 flex flex-col items-center justify-center gap-4 border-2 border-dashed border-slate-100 rounded-3xl bg-slate-50/50">
+        <span class="text-4xl grayscale opacity-40">{{ currentTab === 'mine' ? '📂' : '🏢' }}</span>
+        <p class="text-slate-500 font-medium">{{ currentTab === 'mine' ? '您还没有创建过个人模板' : '暂无系统模板' }}</p>
       </div>
       
       <!-- 加载中 -->
@@ -152,6 +158,7 @@
 <script setup>
 import { ref, computed, onMounted } from 'vue'
 import RatioSelector from './RatioSelector.vue'
+import TemplatePreview from '../template/TemplatePreview.vue'
 
 const props = defineProps({
   templates: { type: Array, default: () => [] },
@@ -160,6 +167,14 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['generate'])
+
+const currentTab = ref('system')
+const filteredTemplates = computed(() => {
+  return props.templates.filter(t => {
+    if (currentTab.value === 'system') return t.is_system === true
+    return !t.is_system
+  })
+})
 
 const selectedTemplate = ref(null)
 const form = ref({
@@ -206,28 +221,26 @@ const isValid = computed(() => {
 })
 
 function selectTemplate(tpl) {
-  selectedTemplate.value = tpl
+  // 兜底：确保从 config 中解构出关键字段（防止缓存/数据源未映射的情况）
+  const resolved = {
+    ...tpl,
+    text_slots: tpl.text_slots || tpl.config?.text_slots || [],
+    color_options: tpl.color_options || tpl.config?.color_options || [],
+    default_aspect_ratio: tpl.default_aspect_ratio || tpl.config?.default_aspect_ratio || '3:4',
+    ai_prompt_template: tpl.ai_prompt_template || tpl.config?.ai_prompt_template || '',
+  }
+  selectedTemplate.value = resolved
   const params = {}
-  for (const slot of tpl.text_slots || []) {
+  for (const slot of resolved.text_slots) {
     params[slot.name] = ''
   }
   form.value = {
     params,
-    colorOption: tpl.color_options?.[0] || '',
+    colorOption: resolved.color_options?.[0] || '',
     aspectRatio: null,
   }
 }
-function getTemplateHeaderStyle(tpl) {
-  const colorMap = {
-    '通用': 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-    '知识': 'linear-gradient(135deg, #4facfe 0%, #00f2fe 100%)',
-    '美食': 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-    '穿搭': 'linear-gradient(135deg, #a8edea 0%, #fed6e3 100%)',
-  }
-  return {
-    background: colorMap[tpl.category] || 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-  }
-}
+
 
 function handleGenerate() {
   if (!selectedTemplate.value || !isValid.value || props.generating) return

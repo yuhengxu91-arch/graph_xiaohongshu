@@ -90,7 +90,7 @@ import {
   generateExportAll,
   generateStyleTransfer,
   generateBatchPoster,
-  getPosterTemplates,
+  getTemplatesList,
   getPosterStyles,
   getPosterAspectRatios,
 } from './api.js'
@@ -195,15 +195,23 @@ async function loadStyles() {
 }
 
 async function loadTemplates() {
-  const CACHE_KEY = 'poster_templates_cache'
+  // 清除旧版缓存 key，避免干扰
+  localStorage.removeItem('poster_templates_cache')
+  const CACHE_KEY = 'poster_all_templates_cache'
   const cached = getCachedData(CACHE_KEY)
   if (cached) {
     templates.value = cached
     return
   }
   try {
-    const data = await getPosterTemplates()
-    templates.value = data.templates || []
+    const data = await getTemplatesList({ scope: 'all' })
+    const parsedData = (data || []).map(t => ({
+      ...t,
+      text_slots: t.config?.text_slots || [],
+      color_options: t.config?.color_options || [],
+      default_aspect_ratio: t.config?.default_aspect_ratio || '3:4',
+    }))
+    templates.value = parsedData
     setCachedData(CACHE_KEY, templates.value)
   } catch (e) {
     console.error('加载模板失败:', e)
@@ -297,17 +305,10 @@ function handleCustomGenerate(form) {
 
 function handleTemplateGenerate(form) {
   const payload = {
+    template_id: form.template.id,
     params: form.params,
     color_option: form.colorOption || undefined,
     aspect_ratio: form.aspectRatio || undefined,
-  }
-
-  // 个人模板（数据库模板）: 传 template_id
-  if (form.template.id) {
-    payload.template_id = form.template.id
-  } else {
-    // 系统模板: 传 template_index
-    payload.template_index = form.template.index
   }
 
   generateWithWrapper('template', payload)

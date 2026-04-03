@@ -15,9 +15,9 @@
         {{ template.name.substring(0, 1) }}
       </div>
       
-      <!-- 悬停操作蒙层 (仅限非系统模板) -->
+      <!-- 悬停操作蒙层 (仅限非系统模板且非选择模式) -->
       <div 
-        v-if="!isSystem" 
+        v-if="!isSystem && !selectionMode" 
         class="absolute inset-0 bg-white/20 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3"
       >
         <button 
@@ -78,7 +78,7 @@
         使用模板
       </button>
       <button 
-        v-if="isSystem"
+        v-if="isSystem && !selectionMode"
         @click.stop="$emit('duplicate')"
         class="px-4 py-2 bg-white text-slate-700 text-xs font-bold rounded-xl border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all flex items-center gap-1.5"
       >
@@ -98,6 +98,10 @@ const props = defineProps({
     required: true
   },
   isSystem: {
+    type: Boolean,
+    default: false
+  },
+  selectionMode: {
     type: Boolean,
     default: false
   }
