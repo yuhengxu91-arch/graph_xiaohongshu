@@ -1,0 +1,55 @@
+version: "3.9"
+
+services:
+  # ============ PostgreSQL 数据库 ============
+  postgres:
+    image: postgres:16-alpine
+    container_name: xhs-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-Xhs2026Secure!}
+      POSTGRES_DB: langgraph_db
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+      - ./scripts/init_db.sql:/docker-entrypoint-initdb.d/01-init.sql:ro
+    ports:
+      - "127.0.0.1:5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+
+  # ============ FastAPI 后端 ============
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: xhs-backend
+    restart: always
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgresql+asyncpg://postgres:${POSTGRES_PASSWORD:-Xhs2026Secure!}@postgres:5432/langgraph_db
+      POSTGRES_URI: postgresql://postgres:${POSTGRES_PASSWORD:-Xhs2026Secure!}@postgres:5432/langgraph_db
+    env_file:
+      - .env.production
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - ./static:/app/static
+      - ./logs:/app/logs
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+
+volumes:
+  pgdata:
+    driver: local
