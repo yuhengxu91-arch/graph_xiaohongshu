@@ -124,7 +124,27 @@ async function handleAuth() {
     const user = await getCurrentUser()
     emit('login-success', user.username)
   } catch (e) {
-    authError.value = e.response?.data?.detail || e.message || '操作失败'
+    const status = e.response?.status
+    const detail = e.response?.data?.detail
+    if (detail && typeof detail === 'string') {
+      authError.value = detail
+    } else if (status === 401) {
+      authError.value = '用户名或密码错误'
+    } else if (status === 409) {
+      authError.value = '该用户名已被注册，请换一个试试'
+    } else if (status === 422) {
+      authError.value = '请检查输入格式（用户名至少3位，密码至少6位）'
+    } else if (status === 502 || status === 503) {
+      authError.value = '服务器暂时不可用，请稍后再试'
+    } else if (status === 500) {
+      authError.value = '服务器内部错误，请联系管理员'
+    } else if (!navigator.onLine) {
+      authError.value = '网络连接已断开，请检查网络'
+    } else if (e.code === 'ERR_NETWORK') {
+      authError.value = '无法连接到服务器，请检查网络或稍后重试'
+    } else {
+      authError.value = '操作失败，请稍后重试'
+    }
   } finally {
     authLoading.value = false
   }
