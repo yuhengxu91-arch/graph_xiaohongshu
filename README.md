@@ -2,6 +2,7 @@
 
 基于 **LangGraph 1.0+** / **FastAPI** / **Vue 3** 构建的全链路内容创作平台。
 涵盖 AI 选题 → 文章撰写 → 配图生成 → **AI 海报生成** → **作品库管理** → **多平台内容适配** → **内容日历规划**。
+支持 Docker Compose 一键部署，已落地阿里云 SAE 与腾讯云轻量服务器。
 
 ---
 
@@ -100,42 +101,122 @@
 
 ## 🛠 技术栈
 
+### 📐 系统架构
+
+```mermaid
+graph TB
+    subgraph Client["🖥️ 用户浏览器"]
+        VUE["Vue 3 + Vite + TailwindCSS"]
+    end
+
+    subgraph Backend["⚙️ FastAPI 后端"]
+        API["REST API Layer<br/>(11 路由模块)"]
+        AUTH["JWT 认证<br/>Argon2 密码哈希"]
+
+        subgraph Services["📦 业务服务层"]
+            PS["海报服务<br/>(8 种生成模式)"]
+            WF["工作流服务"]
+            PA["平台适配服务"]
+            CS["日历规划服务"]
+            GS["作品库 / 模板 / 品牌服务"]
+        end
+
+        subgraph Graph["🔀 LangGraph 工作流引擎"]
+            NODES["Planner → Writer → Visualizer"]
+            SUB["选题交互子图<br/>(Human-in-the-loop)"]
+            CKP["PostgreSQL Checkpointer<br/>(状态持久化)"]
+        end
+
+        subgraph Infra["🏗️ 基础设施"]
+            LOG["structlog<br/>JSON 日志 + PII 脱敏"]
+            MW["请求日志中间件"]
+            LS["LangSmith 追踪"]
+        end
+    end
+
+    subgraph AI["🤖 AI 服务"]
+        LLM["Doubao Seed 系列<br/>(选题/写作/改写)"]
+        IMG["图片生成引擎<br/>Gemini │ Doubao Seedream │ 即梦"]
+    end
+
+    subgraph DB["🗄️ PostgreSQL 16"]
+        TABLES["Users │ Posters │ Templates<br/>Gallery │ Calendar │ Brand<br/>Platform Variants │ Batch Tasks"]
+        LGCP["LangGraph Checkpoint Tables"]
+    end
+
+    VUE -->|"HTTP / SSE"| API
+    API --> AUTH
+    API --> Services
+    API --> Graph
+    Services --> AI
+    Graph --> AI
+    Services --> DB
+    Graph -->|"Checkpointer"| LGCP
+    CKP --> LGCP
+    LOG -.->|"记录"| MW
+    LS -.->|"追踪"| Graph
+
+    style Client fill:#1a1a2e,stroke:#e94560,color:#fff
+    style Backend fill:#16213e,stroke:#0f3460,color:#fff
+    style AI fill:#1a1a2e,stroke:#e94560,color:#fff
+    style DB fill:#0f3460,stroke:#533483,color:#fff
+    style Services fill:#1a1a2e,stroke:#533483,color:#fff
+    style Graph fill:#1a1a2e,stroke:#e94560,color:#fff
+    style Infra fill:#1a1a2e,stroke:#0f3460,color:#fff
+```
+
+### 📊 技术选型
+
 | 层 | 技术 |
 |----|------|
-| 后端框架 | **FastAPI** (Python 3.10+) |
+| 后端框架 | **FastAPI** (Python 3.13+) |
 | 工作流引擎 | **LangGraph 1.0+** |
-| 数据库 | **PostgreSQL** + SQLAlchemy (async) |
-| AI 图片 | **Gemini API** / **火山引擎 Doubao** / **即梦** (多引擎切换) |
-| AI 文案 | 火山引擎 Doubao / 通用 LLM |
+| 数据库 | **PostgreSQL 16** + SQLAlchemy 2.0 (async) + asyncpg |
+| AI 图片 | **Gemini API** / **火山引擎 Doubao (Seedream)** / **即梦** (多引擎切换) |
+| AI 文案 | 火山引擎 Doubao (Seed 系列) / 通用 OpenAI 兼容 LLM |
 | 前端框架 | **Vue 3** + Vite |
 | 样式 | **TailwindCSS** (现代 UI 组件体系) |
-| 认证 | JWT Token 认证体系 |
+| 认证 | JWT Token (python-jose) + Argon2 密码哈希 |
+| 日志 | **structlog** (JSON 结构化日志 + PII 脱敏) |
+| 追踪 | **LangSmith** (LangGraph 工作流可观测性) |
+| 容器化 | **Docker Compose** (PostgreSQL + FastAPI 一体化部署) |
 
 ---
 
 ## 🚀 快速开始
 
-### ⚡ 一键启动（推荐）
+### ⚡ Docker Compose 一键启动（推荐）
+
+```bash
+# 克隆项目
+git clone https://github.com/your-username/graph_xiaohongshu.git
+cd graph_xiaohongshu
+
+# 配置环境变量
+cp .env.example .env
+# 编辑 .env 填写 API Key 等配置
+
+# 启动（PostgreSQL + FastAPI 后端）
+docker compose up -d --build
+
+# 启动前端
+cd frontend && npm install && npm run dev
+```
+
+### 🖥️ Windows 一键启动
 
 > Windows 下双击项目根目录的 `start.bat`，自动关闭旧进程并启动前后端。
 
 ```bash
-# 从文件资源管理器双击，或在 CMD 中运行：
 start.bat
 ```
 
-### 手动启动
-
-#### 1. 环境准备
+#### 1. 后端（手动方式）
 
 ```bash
 # 确保 PostgreSQL 运行，创建数据库
 psql -U postgres -c "CREATE DATABASE langgraph_db;"
-```
 
-#### 2. 后端
-
-```bash
 python -m venv .venv
 
 # Windows
@@ -146,34 +227,52 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-#### 3. 配置 `.env`
+#### 2. 配置 `.env`
 
 ```env
-DATABASE_URL=postgresql+asyncpg://postgres:your_password@localhost:5432/aicontent
-POSTGRES_URI=postgresql://postgres:your_password@localhost:5432/aicontent
+# ===== 数据库 =====
+DATABASE_URL=postgresql+asyncpg://postgres:your_password@localhost:5432/langgraph_db
+POSTGRES_URI=postgresql://postgres:your_password@localhost:5432/langgraph_db
 
-# AI 图片引擎配置（支持多代理）
-IMAGE_PROVIDER=gemini
+# ===== LLM 配置（火山引擎 Doubao）=====
+LLM_API_KEY=your_ark_api_key
+LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+LLM_MODEL=doubao-seed-1-8-251228
+LLM_MODEL_FAST=doubao-seed-1-6-flash-250828
+
+# ===== AI 图片引擎（多引擎切换）=====
+IMAGE_PROVIDER=gemini              # gemini / doubao / jimeng
+
+# Gemini 配置
 IMAGE_API_KEY=your_gemini_api_key
 IMAGE_BASE_URL=https://generativelanguage.googleapis.com
 IMAGE_MODEL=gemini-3-pro-image-preview
 
-# Gemini 代理 2（可选）
-IMAGE_API_KEY_CH=your_changhuai_key
-IMAGE_BASE_URL_CH=https://www.changhuai.vip
-IMAGE_MODEL_CH=gemini-3-pro-image-preview
+# 豆包生图（复用 LLM_API_KEY）
+DOUBAO_IMAGE_MODEL=doubao-seedream-4-5-251128
 
-# LLM 配置
-ARK_API_KEY=your_ark_api_key
+# 即梦（火山引擎 AK/SK）
+JIMENG_ACCESS_KEY=your_access_key
+JIMENG_SECRET_KEY=your_secret_key
+
+# ===== 日志 =====
+LOG_LEVEL=INFO                     # DEBUG / INFO / WARNING / ERROR
+LOG_TARGET=file                    # file / loki / aliyun / volcengine
+LOG_PII_ANONYMIZE=true             # PII 脱敏（邮箱、API Key、手机号）
+
+# ===== LangSmith 追踪（可选）=====
+LANGCHAIN_TRACING_V2=true
+LANGCHAIN_API_KEY=your_langsmith_key
+LANGCHAIN_PROJECT=xiaohongshu-content-assistant
 ```
 
-#### 4. 启动后端
+#### 3. 启动后端
 
 ```bash
 uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
 ```
 
-#### 5. 启动前端
+#### 4. 启动前端
 
 ```bash
 cd frontend
@@ -315,7 +414,9 @@ stop.bat
 graph_xiaohongshu/
 ├── app/                              # 后端 Python
 │   ├── api/v1/
-│   │   ├── poster.py                 # 海报生成 API
+│   │   ├── auth.py                   # 认证 API（注册/登录）
+│   │   ├── workflow.py               # 内容工作流 API
+│   │   ├── poster.py                 # 海报生成 API（8 种模式）
 │   │   ├── batch.py                  # 批量生成 API（含 SSE）
 │   │   ├── gallery.py                # 作品库 API
 │   │   ├── user_template.py          # 个人模板 CRUD API
@@ -323,12 +424,11 @@ graph_xiaohongshu/
 │   │   ├── calendar.py               # 内容日历 API
 │   │   ├── brand.py                  # 品牌包 API
 │   │   ├── profile.py                # 个人中心 API
-│   │   ├── workflow.py               # 内容工作流 API
-│   │   ├── auth.py                   # 认证 API
 │   │   └── image.py                  # 通用图片 API
 │   ├── data/
 │   │   ├── poster_templates.json     # 预置海报模板配置
 │   │   ├── style_tags.json           # 风格标签数据
+│   │   ├── system_templates.py       # 6 大系统模板定义
 │   │   ├── hotspot_calendar.py       # 热点日历数据
 │   │   └── platform_rules.py         # 5 大平台规则配置
 │   ├── services/
@@ -341,19 +441,38 @@ graph_xiaohongshu/
 │   │   ├── calendar_planner_service.py # AI 排期规划服务
 │   │   ├── brand_service.py          # 品牌包管理服务
 │   │   ├── profile_service.py        # 用户资料 & 偏好服务
-│   │   ├── llm_service.py            # LLM 服务封装
-│   │   └── image_service.py          # 图片生成服务（多引擎）
+│   │   ├── llm_service.py            # LLM 服务封装（Doubao Seed）
+│   │   ├── image_service.py          # 图片生成服务（Gemini/Doubao/即梦）
+│   │   └── _volcengine_sign.py       # 火山引擎请求签名
 │   ├── models/
-│   │   ├── poster.py                 # 海报生成 / 模板 / 风格标签模型
-│   │   ├── batch_task.py             # 批量任务模型
-│   │   ├── platform_variant.py       # 平台改写版本模型
-│   │   ├── calendar.py               # 日历事件模型
-│   │   ├── brand.py                  # 品牌包模型
-│   │   └── user.py                   # 用户模型
+│   │   ├── poster.py                 # 海报 / 模板 / 风格标签 ORM
+│   │   ├── batch_task.py             # 批量任务 ORM
+│   │   ├── platform_variant.py       # 平台改写版本 ORM
+│   │   ├── calendar.py               # 日历事件 ORM
+│   │   ├── brand.py                  # 品牌包 ORM
+│   │   └── user.py                   # 用户 ORM
 │   ├── graph/                        # LangGraph 工作流
-│   ├── core/                         # 配置 & 数据库
-│   ├── dependencies/                 # 认证依赖注入
-│   └── main.py                       # FastAPI 入口
+│   │   ├── workflow.py               # 主工作流定义
+│   │   ├── state.py                  # AgentState 状态定义
+│   │   ├── metrics.py                # 节点性能指标收集
+│   │   ├── utils.py                  # Checkpointer 管理
+│   │   ├── nodes/                    # 工作流节点
+│   │   │   ├── planner.py            # 选题生成节点
+│   │   │   ├── writer.py             # 文章撰写节点
+│   │   │   └── visualizer.py         # 配图生成节点
+│   │   └── subgraphs/                # 子图
+│   │       └── topic_selection.py     # 选题交互子图
+│   ├── core/                         # 基础设施
+│   │   ├── config.py                 # pydantic-settings 配置
+│   │   ├── db.py                     # SQLAlchemy async 引擎
+│   │   ├── security.py               # JWT 令牌生成与校验
+│   │   ├── logger.py                 # structlog 日志系统
+│   │   ├── middleware.py             # 请求日志中间件
+│   │   ├── pii_anonymizer.py         # PII 脱敏处理器
+│   │   └── callbacks.py              # LangChain 回调
+│   ├── dependencies/                 # FastAPI 依赖注入
+│   │   └── auth.py                   # 当前用户鉴权依赖
+│   └── main.py                       # FastAPI 入口 & 生命周期
 │
 ├── frontend/                         # 前端 Vue 3 + TailwindCSS
 │   └── src/
@@ -369,8 +488,8 @@ graph_xiaohongshu/
 │       ├── ProfilePage.vue           # 个人中心
 │       ├── components/
 │       │   ├── common/               # 通用组件（ConfirmModal 等）
-│       │   ├── poster/               # 海报相关子组件（含 7 大面板）
-│       │   ├── gallery/              # 作品库子组件（Grid/Detail/Filter/BatchToolbar）
+│       │   ├── poster/               # 海报子组件（7 面板 + Canvas 编辑器）
+│       │   ├── gallery/              # 作品库子组件
 │       │   ├── template/             # 模板子组件（Preview/Editor）
 │       │   ├── platform/             # 平台适配子组件
 │       │   ├── calendar/             # 日历子组件
@@ -383,13 +502,20 @@ graph_xiaohongshu/
 │       └── style.css                 # 全局样式
 │
 ├── scripts/                          # 工具脚本
+│   ├── init_db.sql                   # 数据库初始化 SQL
+│   ├── seed_templates.py             # 系统模板 Seed 脚本
+│   └── test_*.py                     # API 测试脚本
 ├── static/                           # 静态资源 & 生成图片
-├── Dockerfile                        # Docker 容器化部署
-├── DEPLOYMENT.md                     # 部署文档
+├── logs/                             # structlog 日志输出
+├── docker-compose.yml                # Docker Compose 编排
+├── Dockerfile                        # Docker 镜像构建
+├── DEPLOYMENT.md                     # 阿里云 SAE 部署文档
+├── DEPLOYMENT_TENCENT.md             # 腾讯云轻量服务器部署文档
 ├── start.bat                         # 一键启动（Windows）
 ├── stop.bat                          # 一键停止（Windows）
 ├── requirements.txt
-├── .env
+├── .env                              # 本地环境变量
+├── .env.production                   # 生产环境变量
 └── README.md
 ```
 
@@ -397,11 +523,13 @@ graph_xiaohongshu/
 
 ## ⚠️ 注意事项
 
-1. **数据库**: 确保 PostgreSQL 运行且可访问
+1. **数据库**: 确保 PostgreSQL 16+ 运行且可访问，或使用 `docker compose up` 自动拉起
 2. **API Key**: 在 `.env` 中配置对应引擎的 API Key（Gemini / Doubao / 即梦）
 3. **图片存储**: 生成的海报保存在 `static/images/posters/`，需确保目录可写
 4. **并发控制**: 批量生成使用 `Semaphore(3)` 限流；全平台导出使用 `Semaphore(2)` 限流
-5. **多引擎切换**: 用户可在个人中心设置 AI 图片引擎偏好，支持 Gemini（多代理）、Doubao、即梦
+5. **多引擎切换**: 用户可在个人中心设置 AI 图片引擎偏好，支持 Gemini、Doubao (Seedream)、即梦
+6. **日志系统**: structlog JSON 结构化日志输出到 `logs/` 目录，内置 PII 脱敏
+7. **部署文档**: 详见 `DEPLOYMENT.md`（阿里云 SAE）和 `DEPLOYMENT_TENCENT.md`（腾讯云轻量服务器）
 
 ## 📄 License
 
