@@ -1006,7 +1006,7 @@ class PosterService:
         payload: Dict[str, Any] = {
             "model": model,
             "prompt": prompt,
-            "response_format": "url",
+            "response_format": "b64_json",
             "size": "2048x2048",
         }
 
@@ -1027,17 +1027,24 @@ class PosterService:
                 response.raise_for_status()
                 result = response.json()
 
-                data_list = result.get("data", [])
-                if data_list:
-                    item = data_list[0]
+                data_list = self._extract_doubao_image_items(result)
+                for item in data_list:
+                    if not isinstance(item, dict):
+                        continue
                     if item.get("b64_json"):
                         return item["b64_json"]
                     if item.get("url"):
                         img_resp = await client.get(item["url"], timeout=60.0)
                         img_resp.raise_for_status()
                         return base64.b64encode(img_resp.content).decode("utf-8")
+                    if item.get("error"):
+                        print(f"[PosterService] doubao 单图生成失败: {item['error']}")
 
-                print(f"[PosterService] doubao 生图响应中未找到图片: {str(result)[:200]}")
+                error_message = self._extract_doubao_error_message(result)
+                if error_message:
+                    print(f"[PosterService] doubao 生图返回错误: {error_message}")
+                else:
+                    print(f"[PosterService] doubao 生图响应中未找到图片: {str(result)[:300]}")
                 return None
 
         except httpx.HTTPStatusError as e:
@@ -1046,6 +1053,38 @@ class PosterService:
         except Exception as e:
             print(f"[PosterService] doubao 生图异常: {e}")
             return None
+
+    def _extract_doubao_image_items(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """兼容方舟/OpenAI 风格和部分代理的嵌套响应结构。"""
+        data = result.get("data")
+        if isinstance(data, list):
+            return data
+
+        if isinstance(data, dict):
+            nested = data.get("data")
+            if isinstance(nested, list):
+                return nested
+
+        images = result.get("images")
+        if isinstance(images, list):
+            return images
+
+        return []
+
+    def _extract_doubao_error_message(self, result: Dict[str, Any]) -> Optional[str]:
+        """提取豆包/代理响应中的错误说明，便于定位失败原因。"""
+        candidates = [result.get("error")]
+        data = result.get("data")
+        if isinstance(data, dict):
+            candidates.append(data.get("error"))
+
+        for candidate in candidates:
+            if isinstance(candidate, dict):
+                return candidate.get("message") or candidate.get("code") or str(candidate)
+            if isinstance(candidate, str):
+                return candidate
+
+        return None
 
     async def _call_gemini_api(
         self, prompt: str,
@@ -1101,12 +1140,15 @@ class PosterService:
                 response.raise_for_status()
                 result = response.json()
 
-                if "candidates" in result and result["candidates"]:
-                    for part in result["candidates"][0]["content"]["parts"]:
-                        if "inlineData" in part:
-                            return part["inlineData"]["data"]
+                image_data = self._extract_gemini_image_data(result)
+                if image_data:
+                    return image_data
 
-                print(f"[PosterService] {tag} 响应中未找到图片数据")
+                reason = self._extract_gemini_no_image_reason(result)
+                if reason:
+                    print(f"[PosterService] {tag} 响应中未找到图片数据: {reason}")
+                else:
+                    print(f"[PosterService] {tag} 响应中未找到图片数据: {str(result)[:300]}")
                 return None
 
         except httpx.HTTPStatusError as e:
@@ -1115,6 +1157,67 @@ class PosterService:
         except Exception as e:
             print(f"[PosterService] {tag} 请求异常: {e}")
             return None
+
+    def _extract_gemini_image_data(self, result: Dict[str, Any]) -> Optional[str]:
+        """从 Gemini generateContent 响应中提取图片 base64，兼容代理的 snake_case。"""
+        candidates = result.get("candidates")
+        if not isinstance(candidates, list):
+            return None
+
+        for candidate in candidates:
+            if not isinstance(candidate, dict):
+                continue
+            content = candidate.get("content")
+            if not isinstance(content, dict):
+                continue
+            parts = content.get("parts")
+            if not isinstance(parts, list):
+                continue
+
+            for part in parts:
+                if not isinstance(part, dict):
+                    continue
+                inline_data = part.get("inlineData") or part.get("inline_data")
+                if isinstance(inline_data, dict) and inline_data.get("data"):
+                    return inline_data["data"]
+
+        return None
+
+    def _extract_gemini_no_image_reason(self, result: Dict[str, Any]) -> Optional[str]:
+        """提取 Gemini 未返回图片时的文本/结束原因，方便定位配置或内容策略问题。"""
+        error = result.get("error")
+        if isinstance(error, dict):
+            return error.get("message") or str(error)
+        if isinstance(error, str):
+            return error
+
+        candidates = result.get("candidates")
+        if not isinstance(candidates, list) or not candidates:
+            return None
+
+        candidate = candidates[0]
+        if not isinstance(candidate, dict):
+            return None
+
+        details = []
+        finish_reason = candidate.get("finishReason") or candidate.get("finish_reason")
+        if finish_reason:
+            details.append(f"finishReason={finish_reason}")
+
+        content = candidate.get("content")
+        if isinstance(content, dict):
+            parts = content.get("parts")
+            if isinstance(parts, list):
+                text_parts = [
+                    part.get("text")
+                    for part in parts
+                    if isinstance(part, dict) and isinstance(part.get("text"), str)
+                ]
+                text = " ".join(text_parts).strip()
+                if text:
+                    details.append(f"text={text[:240]}")
+
+        return "; ".join(details) if details else None
 
     async def _call_jimeng_api(
         self, prompt: str,
