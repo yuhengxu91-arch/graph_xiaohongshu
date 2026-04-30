@@ -58,6 +58,11 @@ class ImageService:
         self.base_url_ch = os.getenv("IMAGE_BASE_URL_CH", "https://www.changhuai.vip")
         self.model_ch = os.getenv("IMAGE_MODEL_CH", "gemini-3-pro-image-preview")
 
+        # GPT Image 2（changhuai）
+        self.gpt_image_api_key = os.getenv("GPT_IMAGE_API_KEY", "")
+        self.gpt_image_base_url = os.getenv("GPT_IMAGE_BASE_URL", "https://www.changhuai.vip")
+        self.gpt_image_model = os.getenv("GPT_IMAGE_MODEL", "gpt-image-2")
+
         self.image_dir = Path("static/images/generated")
         self.image_dir.mkdir(parents=True, exist_ok=True)
 
@@ -93,6 +98,8 @@ class ImageService:
             return await self._call_doubao_image_api(prompt)
         if effective == "jimeng":
             return await self._call_jimeng_api(prompt)
+        if effective == "gpt_image":
+            return await self._call_gpt_image_api(prompt)
         if effective == "gemini_ch":
             return await self._call_gemini_api(prompt, use_changhuai=True)
         return await self._call_gemini_api(prompt)
@@ -189,6 +196,57 @@ class ImageService:
             return None
         except Exception as e:
             print(f"[ImageService] {tag} 请求异常: {e}")
+            return None
+
+    async def _call_gpt_image_api(self, prompt: str) -> Optional[str]:
+        """调用 GPT Image 2 生图 API（OpenAI 兼容，changhuai 渠道）"""
+        api_key = self.gpt_image_api_key
+        base_url = self.gpt_image_base_url
+        model = self.gpt_image_model
+
+        if not api_key:
+            print("[ImageService] GPT_IMAGE_API_KEY 未配置")
+            return None
+
+        url = f"{base_url}/v1/images/generations"
+        print(f"[ImageService] GPT-Image 请求 URL: {url}")
+        print(f"[ImageService] GPT-Image 使用模型: {model}")
+
+        payload = {
+            "model": model,
+            "prompt": prompt,
+            "n": 1,
+            "size": "1024x1024",
+        }
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {api_key}",
+        }
+
+        try:
+            async with httpx.AsyncClient(timeout=120.0) as client:
+                response = await client.post(url, json=payload, headers=headers)
+                response.raise_for_status()
+                result = response.json()
+                data_list = result.get("data", [])
+                if data_list:
+                    item = data_list[0]
+                    # 优先使用 b64_json
+                    if item.get("b64_json"):
+                        return item["b64_json"]
+                    # 否则下载 URL 中的图片
+                    if item.get("url"):
+                        img_resp = await client.get(item["url"], timeout=60.0)
+                        img_resp.raise_for_status()
+                        return base64.b64encode(img_resp.content).decode("utf-8")
+
+                print(f"[ImageService] GPT-Image 生图无图片: {str(result)[:200]}")
+                return None
+        except httpx.HTTPStatusError as e:
+            print(f"[ImageService] GPT-Image HTTP 错误: {e.response.status_code} {e.response.text[:200]}")
+            return None
+        except Exception as e:
+            print(f"[ImageService] GPT-Image 请求异常: {e}")
             return None
 
     async def _call_jimeng_api(self, prompt: str) -> Optional[str]:

@@ -98,6 +98,7 @@ const engines = [
   { value: null,         icon: '⚙️', label: '跟随系统默认',     desc: '使用 .env 全局配置的引擎' },
   { value: 'gemini',     icon: '💎', label: 'Gemini (xunruijie)', desc: 'gemini-3-pro-image-preview' },
   { value: 'gemini_ch',  icon: '🌟', label: 'Gemini (changhuai)', desc: 'gemini-3-pro-image-preview' },
+  { value: 'gpt_image',  icon: '🖼️', label: 'GPT Image 2',        desc: 'OpenAI GPT Image 2 生图 (changhuai)' },
   { value: 'doubao',     icon: '🎨', label: '豆包 Seedream',      desc: '火山方舟 doubao-seedream 生图' },
   { value: 'jimeng',     icon: '🔮', label: '即梦',               desc: '火山引擎即梦 AI 生图' },
 ]
