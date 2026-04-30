@@ -357,7 +357,7 @@ curl http://119.91.198.219/ark-h5/health
 
 ## 5️⃣ HTTPS 配置（绑域名后）
 
-> Nginx 在 Docker 容器内，推荐使用**宿主机反向代理做 SSL 终止**，更灵活。
+> 宿主机 Nginx 作为总入口，推荐直接在宿主机上配置 SSL，或使用 Caddy 做 SSL 终止。
 
 ### 5.1 添加 DNS 记录
 
@@ -367,43 +367,45 @@ curl http://119.91.198.219/ark-h5/health
 xhs.yourdomain.com → 119.91.198.219
 ```
 
-### 5.2 安装 Caddy（推荐，自动 HTTPS）
+### 5.2 方案一：宿主机 Nginx + Certbot（推荐）
+
+```bash
+# 安装 certbot
+sudo apt install -y certbot python3-certbot-nginx
+
+# 申请证书（会自动修改 Nginx 配置）
+sudo certbot --nginx -d xhs.yourdomain.com
+
+# 验证自动续期
+sudo certbot renew --dry-run
+```
+
+### 5.3 方案二：Caddy 替代宿主机 Nginx
+
+如果不想用宿主机 Nginx，可以用 Caddy 替代（自动 HTTPS）：
 
 ```bash
 sudo apt install -y debian-keyring debian-archive-keyring apt-transport-https
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | sudo gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
 curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | sudo tee /etc/apt/sources.list.d/caddy-stable.list
-sudo apt update
-sudo apt install caddy
+sudo apt update && sudo apt install caddy
 ```
-
-### 5.3 配置 Caddy
 
 ```bash
 sudo tee /etc/caddy/Caddyfile << 'EOF'
 xhs.yourdomain.com {
-    reverse_proxy localhost:80
+    reverse_proxy localhost:8080
 }
 EOF
 
-sudo systemctl reload caddy
+# 停用宿主机 Nginx，启用 Caddy
+sudo systemctl stop nginx && sudo systemctl disable nginx
+sudo systemctl enable caddy && sudo systemctl start caddy
 ```
 
-> Caddy 会自动申请和续期 Let's Encrypt SSL 证书，零配置 HTTPS。
+> ⚠️ 注意：切换到 Caddy 前，需要将 ark-h5 的路由也迁移到 Caddyfile 中。
 
-### 5.4 更新 Docker Nginx 端口（可选）
-
-如果使用 Caddy 做 SSL 终止，可以将 Docker Nginx 改为监听非 80 端口（如 8080），避免端口冲突：
-
-```yaml
-# docker-compose.yml 中 nginx 服务
-ports:
-  - "127.0.0.1:8080:80"   # 仅本地可访问
-```
-
-然后 Caddy 反向代理到 `localhost:8080`。
-
-### 5.5 更新 CORS
+### 5.4 更新 CORS
 
 更新 `.env.production` 中的 CORS_ORIGINS 为 HTTPS 域名：
 
@@ -422,53 +424,33 @@ docker compose up -d --build
 
 ## 6️⃣ 多应用扩展
 
-同一服务器部署第二个应用时，修改 Nginx 配置：
+当前已在同一服务器部署两个应用（xhs + ark-h5），通过宿主机 Nginx 做路由分发：
 
-### 方案 A：子域名路由（需域名）
-
-```nginx
-# /etc/nginx/sites-available/app-xhs
-server {
-    listen 80;
-    server_name xhs.yourdomain.com;
-    root /opt/graph_xiaohongshu/frontend-dist;
-
-    location /api/ { proxy_pass http://127.0.0.1:8000; ... }
-    location /static/ { proxy_pass http://127.0.0.1:8000; ... }
-    location / { try_files $uri $uri/ /index.html; }
-}
-
-# /etc/nginx/sites-available/app-other
-server {
-    listen 80;
-    server_name other.yourdomain.com;
-    root /opt/other-app/frontend-dist;
-
-    location /api/ { proxy_pass http://127.0.0.1:8001; ... }
-    location / { try_files $uri $uri/ /index.html; }
-}
-```
-
-### 方案 B：路径路由（无域名）
+### 当前架构（路径路由）
 
 ```nginx
 server {
     listen 80 default_server;
 
-    # 应用1：小红书助手
-    location /xhs/ {
-        alias /opt/graph_xiaohongshu/frontend-dist/;
-        try_files $uri $uri/ /xhs/index.html;
-    }
-    location /xhs/api/ { proxy_pass http://127.0.0.1:8000/api/; }
+    # 应用1：小红书助手 → Docker Nginx
+    location / { proxy_pass http://127.0.0.1:8080; ... }
+    location /api/ { proxy_pass http://127.0.0.1:8080; ... }
 
-    # 应用2：其他应用
-    location /app2/ {
-        alias /opt/other-app/frontend-dist/;
-        try_files $uri $uri/ /app2/index.html;
-    }
-    location /app2/api/ { proxy_pass http://127.0.0.1:8001/api/; }
+    # 应用2：ark-h5 → 独立 Docker 容器
+    location /ark-h5/ { ... }  # 前端静态文件 + API 代理到 3001
 }
+```
+
+### 扩展第三个应用
+
+```bash
+# 1. 在 /opt/new-app/ 部署新应用，Docker 监听 127.0.0.1:PORT
+# 2. 在宿主机 Nginx 配置中添加 location 块
+location /new-app/ {
+    proxy_pass http://127.0.0.1:PORT;
+    proxy_set_header Host $host;
+}
+# 3. sudo nginx -t && sudo systemctl reload nginx
 ```
 
 **要点**：每个应用独立目录 + 独立 docker-compose + 不同端口，可共享 PostgreSQL（不同数据库）。
@@ -626,8 +608,8 @@ ps aux --sort=-%mem | head -10               # 内存 Top 10
 ps aux --sort=-%cpu | head -10               # CPU Top 10
 
 # API 健康检查
-curl -s http://127.0.0.1:8000/health | python3 -m json.tool
-curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/api/health
+curl -s http://127.0.0.1:8080/health | python3 -m json.tool
+curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1/health
 ```
 
 ### 7.8 服务自愈与开机自启
@@ -642,7 +624,8 @@ sudo systemctl is-enabled docker
 # sudo reboot
 # （等待 1 分钟后重连）
 # docker ps                   # 应看到三个容器 running
-# curl http://localhost/health # 应返回 200
+# curl http://localhost:8080/health  # 应返回 200（通过 Docker Nginx）
+# curl http://localhost/health       # 应返回 200（通过宿主机 Nginx）
 ```
 
 ### 7.9 紧急回滚
@@ -688,40 +671,41 @@ RUN pip install --no-cache-dir -r requirements.txt \
 
 ### Q2: 浏览器刷新后页面 404
 
-Nginx 配置中缺少 SPA 回退。确保 `location /` 包含：
+Docker Nginx `nginx/default.conf` 中已配置 SPA 回退（`try_files`）。如果仍出现 404，检查宿主机 Nginx 是否正确代理到 Docker Nginx：
 
-```nginx
-location / {
-    try_files $uri $uri/ /index.html;
-}
+```bash
+# 直连 Docker Nginx 测试
+curl -I http://127.0.0.1:8080/workflow
+# 应返回 200
 ```
 
 ### Q3: 图片不显示（配图 1/2/3 为空白）
 
-Nginx 缺少 `/static/` 代理配置。添加：
+检查宿主机 Nginx 是否将 `/static/` 代理到 Docker Nginx：
 
-```nginx
-location /static/ {
-    proxy_pass http://127.0.0.1:8000;
-    proxy_set_header Host $host;
-    expires 7d;
-}
+```bash
+curl -I http://127.0.0.1:8080/static/images/
+# 如果返回 502，检查后端容器是否运行
+docker logs xhs-backend --tail 20
 ```
 
 ### Q4: 后端返回 500，日志显示 `column xxx does not exist`
 
 数据库表结构与代码不匹配。执行 2.7 步骤补齐缺失字段。
 
-### Q5: Nginx 返回 500 Internal Server Error
+### Q5: 502 Bad Gateway
 
-通常是 `root` 目录不存在或权限问题：
+宿主机 Nginx 返回 502 通常说明 Docker Nginx 未运行或端口不匹配：
 
 ```bash
-# 确认前端构建产物目录存在
-ls /opt/graph_xiaohongshu/frontend-dist/index.html
+# 检查容器状态
+docker ps
 
-# 确认权限
-sudo chown -R ubuntu:ubuntu /opt/graph_xiaohongshu/frontend-dist/
+# 确认 Docker Nginx 监听 8080
+curl http://127.0.0.1:8080/health
+
+# 如果容器未运行，重启
+docker compose up -d
 ```
 
 ### Q6: Vercel 方案的局限性（为什么不用 Vercel）
@@ -741,4 +725,4 @@ sudo chown -R ubuntu:ubuntu /opt/graph_xiaohongshu/frontend-dist/
 
 ---
 
-*最后更新：2026-04-09*
+*最后更新：2026-04-30*
