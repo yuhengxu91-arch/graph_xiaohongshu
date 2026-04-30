@@ -3,8 +3,10 @@
 # 仅复制后端运行所需的文件到镜像中
 # ============================================================
 
-# 前端（通过 OSS + CDN 独立部署）
-frontend/
+# 前端（排除构建产物和依赖，源码保留给 nginx.dockerfile 多阶段构建）
+frontend/node_modules/
+frontend/dist/
+frontend/.vercel/
 
 # Python 虚拟环境
 app/venv/
