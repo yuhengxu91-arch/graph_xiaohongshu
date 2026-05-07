@@ -58,9 +58,9 @@ class ImageService:
         self.base_url_ch = os.getenv("IMAGE_BASE_URL_CH", "https://www.changhuai.vip")
         self.model_ch = os.getenv("IMAGE_MODEL_CH", "gemini-3-pro-image-preview")
 
-        # GPT Image 2（changhuai）
+        # GPT Image 2（scdn）
         self.gpt_image_api_key = os.getenv("GPT_IMAGE_API_KEY", "")
-        self.gpt_image_base_url = os.getenv("GPT_IMAGE_BASE_URL", "https://www.changhuai.vip")
+        self.gpt_image_base_url = os.getenv("GPT_IMAGE_BASE_URL", "https://api.scdn.online")
         self.gpt_image_model = os.getenv("GPT_IMAGE_MODEL", "gpt-image-2")
 
         self.image_dir = Path("static/images/generated")
@@ -224,7 +224,7 @@ class ImageService:
         }
 
         try:
-            async with httpx.AsyncClient(timeout=120.0) as client:
+            async with httpx.AsyncClient(timeout=300.0) as client:
                 response = await client.post(url, json=payload, headers=headers)
                 response.raise_for_status()
                 result = response.json()
