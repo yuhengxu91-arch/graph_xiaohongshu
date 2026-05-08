@@ -76,7 +76,7 @@ CORS → 请求日志中间件 → JWT 认证 → Argon2 密码哈希
   4×3 的服务网格：
   · poster_service / batch_service / gallery_service / template_service
   · platform_adapter_service / calendar_service / calendar_planner_service / brand_service
-  · profile_service / llm_service / image_service / _volcengine_sign
+  · profile_service / llm_service / image_service
 
 ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 第 3 层 — 数据层（Data Tier）
@@ -102,10 +102,10 @@ langgraph_checkpoint (状态持久化)
   · 火山方舟 Doubao Seed 系列 — 选题/写作/改写 LLM
   · OpenAI 兼容接口（通用 LLM）
 
-🎨 AI 图片引擎（三选一切换）：
+🎨 AI 图片引擎（多引擎切换）：
   · Google Gemini API — gemini-3-pro-image-preview
+  · GPT Image — gpt-image-2
   · 火山方舟 Doubao Seedream — seedream-4-5
-  · 火山引擎即梦 — high_aes_general_v21_L
 
 🔍 可观测性：
   · LangSmith — LangGraph 工作流追踪
@@ -187,7 +187,7 @@ topic_selection（引用子图，蓝色发光边框）
     ↓
 ┌─ generate_images ─────────────────┐
 │ 🎨 AI 配图生成                     │
-│ · 多引擎切换：Gemini / Doubao / 即梦│
+│ · 多引擎切换：Gemini / GPT Image / Doubao│
 │ · asyncio.gather 并行生成          │
 │ · 失败自动重试（备用 Prompt）       │
 │ · 输出：image_urls 列表            │
@@ -269,7 +269,7 @@ Human-in-the-loop 节点右上角标注 「interrupt()」 标签。
     ↓
 POST /api/v1/poster/inpaint 或 /erase
     ↓
-image_service → 多引擎调用（Gemini / Doubao / 即梦）
+image_service → 多引擎调用（Gemini / GPT Image / Doubao）
     ↓
 返回新图 → 保存至 Gallery
 
@@ -284,7 +284,7 @@ image_service → 多引擎调用（Gemini / Doubao / 即梦）
    · 输出：小红书 3:4 / 抖音 9:16 / 微信 1:1 / B站 16:9 / 微博 16:9
 
 底部标注 AI 图片引擎切换：
-🔄 Gemini API ↔ Doubao Seedream ↔ 即梦
+🔄 Gemini API ↔ GPT Image ↔ Doubao Seedream
   （用户可在个人中心偏好设置中切换）
 
 每种模式用不同颜色的发光边框，专业技术文档风格。
@@ -332,8 +332,8 @@ image_service → 多引擎调用（Gemini / Doubao / 即梦）
 
 🎨 AI 图片（多引擎）| 渐变橙色区域
   Google Gemini API — gemini-3-pro-image-preview
+  GPT Image — gpt-image-2
   火山方舟 Doubao Seedream 4.5 — 文生图
-  火山引擎即梦 — high_aes_general_v21_L
   Pillow — 图片后处理
 
 🔐 安全 & 可观测性 | 渐变红色区域
@@ -389,7 +389,7 @@ image_service → 多引擎调用（Gemini / Doubao / 即梦）
 
 FastAPI 后端 ──→ 火山方舟 Doubao API（LLM 文案生成）
             ──→ Gemini API（图片生成 - 代理中转）
-            ──→ 火山引擎即梦 API（图片生成 - AK/SK 签名认证）
+            ──→ GPT Image / Doubao Seedream（图片生成）
             ──→ LangSmith（工作流追踪 - 可选）
 
 ━━━ 数据持久化 ━━━

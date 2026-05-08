@@ -628,6 +628,11 @@ export async function duplicateTemplate(id) {
   return res.data
 }
 
+export async function publishTemplate(id) {
+  const res = await api.post(`/templates/${id}/publish`)
+  return res.data
+}
+
 // ============== 个人中心 API (Profile) ==============
 // 注意：以下为包含部分 Mock 的桩代码以支持前端独立开发
 

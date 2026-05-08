@@ -30,8 +30,12 @@ ASPECT_RATIOS: Dict[str, Dict[str, Any]] = {
 class PosterService:
     """海报生成服务类"""
 
+    SUPPORTED_PROVIDERS = {"gemini", "gemini_ch", "doubao", "gpt_image"}
+
     def __init__(self):
-        self.provider = os.getenv("IMAGE_PROVIDER", "gemini").lower()
+        self.project_root = Path(__file__).resolve().parent.parent.parent
+        configured_provider = os.getenv("IMAGE_PROVIDER", "gemini").lower()
+        self.provider = configured_provider if configured_provider in self.SUPPORTED_PROVIDERS else "gemini"
 
         # Gemini 代理 1（xunruijie）
         self.api_key = os.getenv("IMAGE_API_KEY", "")
@@ -57,7 +61,7 @@ class PosterService:
         self._style_tags: List[Dict] = []
         self._load_preset_data()
 
-        active_key = os.getenv("JIMENG_ACCESS_KEY", "") if self.provider == "jimeng" else self.api_key
+        active_key = self._get_provider_api_key(self.provider)
         if not active_key:
             print(f"[PosterService] 警告: API Key 未配置（当前引擎: {self.provider}），图片生成功能不可用")
 
@@ -65,9 +69,19 @@ class PosterService:
 
     def _get_effective_provider(self, provider_override: Optional[str] = None) -> str:
         """获取实际使用的引擎，支持用户偏好覆盖"""
-        if provider_override and provider_override != "system":
+        if provider_override and provider_override != "system" and provider_override in self.SUPPORTED_PROVIDERS:
             return provider_override
         return self.provider
+
+    def _get_provider_api_key(self, provider: str) -> str:
+        """返回 provider 对应的 API Key，用于启动时配置检查。"""
+        if provider == "doubao":
+            return os.getenv("LLM_API_KEY", "")
+        if provider == "gemini_ch":
+            return self.api_key_ch
+        if provider == "gpt_image":
+            return self.gpt_image_api_key
+        return self.api_key
 
     # ======================== 预置数据加载 ========================
 
@@ -125,6 +139,7 @@ class PosterService:
         aspect_ratio: str = "3:4",
         color_tone: Optional[str] = None,
         provider_override: Optional[str] = None,
+        brand_kit: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         自定义生成海报
@@ -140,7 +155,7 @@ class PosterService:
         """
         # 1. 构建增强提示词
         enhanced_prompt = self._build_custom_prompt(
-            prompt, style_tags, aspect_ratio, color_tone
+            prompt, style_tags, aspect_ratio, color_tone, brand_kit=brand_kit
         )
 
         # 2. 获取尺寸信息
@@ -158,7 +173,7 @@ class PosterService:
             }
 
         # 4. 保存图片
-        image_url = self._save_image(image_base64, prefix="poster_custom")
+        image_url = self._save_image(image_base64, prefix="poster_custom", brand_kit=brand_kit)
 
         return {
             "success": True,
@@ -180,6 +195,7 @@ class PosterService:
         color_option: Optional[str] = None,
         aspect_ratio: Optional[str] = None,
         provider_override: Optional[str] = None,
+        brand_kit: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         模板生成海报
@@ -258,6 +274,8 @@ class PosterService:
 
         # 7. 添加尺寸约束
         ai_prompt += f"\n\n图片比例要求：{effective_ratio}（{ratio_info['label']}平台适用）"
+        if brand_kit:
+            ai_prompt = self._inject_brand(ai_prompt, brand_kit)
 
         # 8. 调用 AI 生成
         print(f"[PosterService] 模板生成 [{template['name']}]: {params.get('title', '')}")
@@ -271,7 +289,7 @@ class PosterService:
             }
 
         # 9. 保存图片
-        image_url = self._save_image(image_base64, prefix="poster_tpl")
+        image_url = self._save_image(image_base64, prefix="poster_tpl", brand_kit=brand_kit)
 
         return {
             "success": True,
@@ -297,6 +315,7 @@ class PosterService:
         color_option: Optional[str] = None,
         aspect_ratio: Optional[str] = None,
         provider_override: Optional[str] = None,
+        brand_kit: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
         使用数据库中的个人模板生成海报
@@ -356,6 +375,8 @@ class PosterService:
 
         # 5. 添加尺寸约束
         ai_prompt += f"\n\n图片比例要求：{effective_ratio}（{ratio_info['label']}平台适用）"
+        if brand_kit:
+            ai_prompt = self._inject_brand(ai_prompt, brand_kit)
 
         # 6. 调用 AI 生成
         print(f"[PosterService] 个人模板生成 [{template_name}]: {params.get('title', '')}")
@@ -370,7 +391,7 @@ class PosterService:
             }
 
         # 7. 保存图片
-        image_url = self._save_image(image_base64, prefix="poster_tpl")
+        image_url = self._save_image(image_base64, prefix="poster_tpl", brand_kit=brand_kit)
 
         return {
             "success": True,
@@ -878,36 +899,44 @@ class PosterService:
         """
         parts = []
 
-        # 兼容模型实例和字典
-        def _get(key):
-            if isinstance(brand_kit, dict):
-                return brand_kit.get(key)
-            return getattr(brand_kit, key, None)
+        brand_name = self._brand_value(brand_kit, "brand_name")
+        if brand_name:
+            parts.append(f"品牌名称: {brand_name}。作为品牌识别参考，除非用户明确要求，不要在画面中生成品牌文字。")
 
-        colors = _get("colors")
+        colors = self._brand_value(brand_kit, "colors")
         if colors and isinstance(colors, list) and len(colors) > 0:
             parts.append(f"使用品牌配色方案: {', '.join(colors)}")
 
-        tone_prompt = _get("tone_prompt")
+        tone_prompt = self._brand_value(brand_kit, "tone_prompt")
         if tone_prompt:
             parts.append(f"设计调性: {tone_prompt}")
 
-        tone = _get("tone")
+        tone = self._brand_value(brand_kit, "tone")
         if tone and not tone_prompt:
             parts.append(f"整体调性: {tone}")
 
-        font_style = _get("font_style")
+        font_style = self._brand_value(brand_kit, "font_style")
         if font_style:
             parts.append(f"字体风格偏好: {font_style}")
 
-        banned_words = _get("banned_words")
+        banned_words = self._brand_value(brand_kit, "banned_words")
         if banned_words and isinstance(banned_words, list) and len(banned_words) > 0:
             parts.append(f"画面中不要出现以下元素或文字: {', '.join(banned_words)}")
+
+        logo_url = self._brand_value(brand_kit, "logo_url")
+        if logo_url:
+            parts.append("品牌 Logo 将由系统在生成后自动贴附，请不要在 AI 画面中伪造、重绘或扭曲 Logo。")
 
         if parts:
             prompt += "\n\n【品牌规范】\n" + "\n".join(parts)
 
         return prompt
+
+    def _brand_value(self, brand_kit: Any, key: str) -> Any:
+        """兼容 BrandKit 模型实例和序列化字典。"""
+        if isinstance(brand_kit, dict):
+            return brand_kit.get(key)
+        return getattr(brand_kit, key, None)
 
     def _build_inpaint_prompt(self, inpaint_prompt: str, aspect_ratio: str = "3:4") -> str:
         """构建局部重绘的增强提示词"""
@@ -985,8 +1014,6 @@ class PosterService:
         effective = self._get_effective_provider(provider_override)
         if effective == "doubao":
             return await self._call_doubao_image_api(prompt, input_image_base64)
-        if effective == "jimeng":
-            return await self._call_jimeng_api(prompt, input_image_base64)
         if effective == "gpt_image":
             return await self._call_gpt_image_api(prompt)
         if effective == "gemini_ch":
@@ -1276,55 +1303,12 @@ class PosterService:
 
         return "; ".join(details) if details else None
 
-    async def _call_jimeng_api(
-        self, prompt: str,
-        input_image_base64: Optional[str] = None,
-    ) -> Optional[str]:
-        """
-        调用火山引擎即梦图片生成 API（HMAC-SHA256 V4 签名认证）。
-        """
-        from app.services._volcengine_sign import volcengine_signed_request
-
-        ak = os.getenv("JIMENG_ACCESS_KEY", "")
-        sk = os.getenv("JIMENG_SECRET_KEY", "")
-        if not ak or not sk:
-            print("[PosterService] 即梦 AK/SK 未配置")
-            return None
-
-        body_params: Dict[str, Any] = {
-            "req_key": "high_aes_general_v21_L",
-            "prompt": prompt,
-            "width": 1024,
-            "height": 1024,
-            "use_pre_llm": True,
-            "use_sr": True,
-            "return_url": True,
-            "logo_info": {"add_logo": False},
-        }
-
-        if input_image_base64:
-            body_params["binary_data_base64"] = [input_image_base64]
-            body_params["req_key"] = "high_aes_general_v21_L"
-
-        try:
-            result = await volcengine_signed_request(ak, sk, body_params)
-
-            if result.get("code") == 10000:
-                image_urls = result.get("data", {}).get("image_urls", [])
-                if image_urls:
-                    async with httpx.AsyncClient(timeout=60.0) as client:
-                        img_resp = await client.get(image_urls[0])
-                        img_resp.raise_for_status()
-                        return base64.b64encode(img_resp.content).decode("utf-8")
-
-            print(f"[PosterService] 即梦返回错误: code={result.get('code')}, msg={result.get('message', '')}")
-            return None
-
-        except Exception as e:
-            print(f"[PosterService] 即梦请求异常: {e}")
-            return None
-
-    def _save_image(self, image_base64: str, prefix: str = "poster") -> str:
+    def _save_image(
+        self,
+        image_base64: str,
+        prefix: str = "poster",
+        brand_kit: Optional[Any] = None,
+    ) -> str:
         """保存 base64 图片到本地，返回访问路径"""
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         unique_id = str(uuid.uuid4())[:8]
@@ -1334,8 +1318,49 @@ class PosterService:
         with open(file_path, "wb") as f:
             f.write(base64.b64decode(image_base64))
 
+        if brand_kit:
+            self._overlay_brand_logo(file_path, brand_kit)
+
         print(f"[PosterService] 图片已保存: {file_path}")
         return f"/static/images/posters/{filename}"
+
+    def _overlay_brand_logo(self, image_path: Path, brand_kit: Any) -> None:
+        """将品牌 Logo 贴到生成图右下角；缺失或不可读时静默跳过。"""
+        logo_url = self._brand_value(brand_kit, "logo_url")
+        if not logo_url:
+            return
+
+        logo_path = self._resolve_local_static_path(str(logo_url))
+        if not logo_path or not logo_path.exists():
+            return
+
+        try:
+            from PIL import Image  # type: ignore
+
+            with Image.open(image_path).convert("RGBA") as base_img:
+                with Image.open(logo_path).convert("RGBA") as logo_img:
+                    max_width = max(48, int(base_img.width * 0.16))
+                    max_height = max(32, int(base_img.height * 0.10))
+                    logo_img.thumbnail((max_width, max_height), Image.Resampling.LANCZOS)
+
+                    margin = max(16, int(min(base_img.width, base_img.height) * 0.04))
+                    position = (
+                        max(margin, base_img.width - logo_img.width - margin),
+                        max(margin, base_img.height - logo_img.height - margin),
+                    )
+                    base_img.alpha_composite(logo_img, position)
+                    base_img.save(image_path, format="PNG")
+        except Exception as exc:
+            print(f"[PosterService] 品牌 Logo 贴附失败，已跳过: {exc}")
+
+    def _resolve_local_static_path(self, url_or_path: str) -> Optional[Path]:
+        """将 /static/... URL 或本地相对路径解析为项目内文件路径。"""
+        if not url_or_path or url_or_path.startswith(("http://", "https://", "data:")):
+            return None
+        path = Path(url_or_path)
+        if path.is_absolute():
+            return self.project_root / str(path).lstrip("/")
+        return self.project_root / path
 
 
 # ======================== 单例实例 ========================

@@ -1,5 +1,5 @@
 <template>
-  <div class="fixed inset-0 z-[1000] flex items-center justify-center p-4 md:p-6 bg-slate-900/40 backdrop-blur-md" @click.self="$emit('close')">
+  <div class="fixed inset-0 z-[1000] flex items-center justify-center p-4 md:p-6 bg-slate-900/40 backdrop-blur-md">
     <div class="bg-white w-full max-w-3xl max-h-[90vh] rounded-[2.5rem] shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in duration-300">
       <!-- 头部 -->
       <div class="px-8 py-6 border-b border-slate-100 flex items-center justify-between bg-white sticky top-0 z-10">
@@ -9,6 +9,7 @@
         </div>
         <button 
           @click="$emit('close')" 
+          aria-label="关闭模板编辑器"
           class="w-10 h-10 rounded-full flex items-center justify-center text-slate-400 hover:bg-slate-50 hover:text-slate-800 transition-colors"
         >
           <svg xmlns="http://www.w3.org/2000/svg" class="w-6 h-6" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>
@@ -139,12 +140,6 @@
 
       <!-- 底部按钮 -->
       <div class="px-8 py-6 bg-slate-50 border-t border-slate-100 flex justify-end gap-3 sticky bottom-0 z-10">
-        <button 
-          @click="$emit('close')" 
-          class="px-6 py-2.5 text-slate-500 font-bold text-sm hover:text-slate-800 transition-colors"
-        >
-          暂不保存
-        </button>
         <button 
           @click="handleSave" 
           :disabled="!isValid"

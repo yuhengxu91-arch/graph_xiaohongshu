@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_async_session
 from app.dependencies.auth import get_current_user_optional
 from app.models.user import User
+from app.services.brand_service import brand_service
 from app.services.poster_service import poster_service
 from app.services.gallery_service import gallery_service
 from app.services.profile_service import profile_service
@@ -103,6 +104,15 @@ async def _get_user_provider(
     if not user:
         return None
     return await profile_service.get_user_image_provider(db, user_id=user.id)
+
+
+async def _get_user_brand_kit(
+    db: AsyncSession, user: Optional[User]
+):
+    """获取当前用户品牌包；未登录或未配置时返回 None"""
+    if not user:
+        return None
+    return await brand_service.get_brand_kit(db, user_id=user.id)
 
 
 # ======================== 查询接口 ========================
@@ -208,12 +218,14 @@ async def generate_custom(
     """
     try:
         provider = await _get_user_provider(db, current_user)
+        brand_kit = await _get_user_brand_kit(db, current_user)
         result = await poster_service.generate_custom(
             prompt=req.prompt,
             style_tags=req.style_tags,
             aspect_ratio=req.aspect_ratio,
             color_tone=req.color_tone,
             provider_override=provider,
+            brand_kit=brand_kit,
         )
         await _auto_save_generation(
             db=db,
@@ -245,6 +257,7 @@ async def generate_from_template(
     """
     try:
         provider = await _get_user_provider(db, current_user)
+        brand_kit = await _get_user_brand_kit(db, current_user)
 
         # 统一通过 template_id 从数据库查找（包含个人模板和系统模板）
         from app.services.template_service import template_service
@@ -264,6 +277,7 @@ async def generate_from_template(
             color_option=req.color_option,
             aspect_ratio=req.aspect_ratio,
             provider_override=provider,
+            brand_kit=brand_kit,
         )
         
         # 使用次数 +1

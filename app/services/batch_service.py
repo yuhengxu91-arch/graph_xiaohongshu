@@ -165,6 +165,7 @@ class BatchService:
                 style_tags=config.get("style_tags"),
                 aspect_ratio=config.get("aspect_ratio", "3:4"),
                 color_tone=config.get("color_tone"),
+                brand_kit=config.get("brand_kit"),
             )
 
             if config.get("series_mode") and not is_anchor and task.get("series_style_anchor"):
@@ -183,7 +184,11 @@ class BatchService:
             if not image_base64:
                 raise RuntimeError("AI 图片生成返回空结果")
 
-            image_url = poster_service._save_image(image_base64, prefix="poster_batch")
+            image_url = poster_service._save_image(
+                image_base64,
+                prefix="poster_batch",
+                brand_kit=config.get("brand_kit"),
+            )
             item["image_url"] = image_url
             item["status"] = "success"
 

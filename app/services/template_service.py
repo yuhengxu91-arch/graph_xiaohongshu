@@ -1,6 +1,6 @@
 """
 用户模板服务层
-负责模板的 CRUD、系统模板 Fork、使用次数统计
+负责模板的 CRUD、公共模板 Fork/发布、使用次数统计
 """
 from __future__ import annotations
 
@@ -36,7 +36,7 @@ class TemplateService:
     ) -> list[dict[str, Any]]:
         """
         获取模板列表。
-        scope: all = 系统+个人; system = 仅系统; mine = 仅个人
+        scope: all = 公共+个人; system = 仅公共; mine = 仅个人
         """
         stmt = select(PosterTemplate).where(PosterTemplate.is_active == True)
 
@@ -48,7 +48,7 @@ class TemplateService:
                 PosterTemplate.is_system == False,
             )
         else:
-            # all: 系统模板 + 当前用户的个人模板
+            # all: 公共模板 + 当前用户的个人模板
             stmt = stmt.where(
                 or_(
                     PosterTemplate.is_system == True,
@@ -143,7 +143,7 @@ class TemplateService:
         user_id: UUID,
         template_id: UUID,
     ) -> bool:
-        """删除个人模板（不允许删除系统模板）"""
+        """删除个人模板（不允许删除公共模板）"""
         tpl = await self.get_template(db, template_id=template_id)
         if tpl is None or tpl.user_id != user_id or tpl.is_system:
             return False
@@ -153,7 +153,7 @@ class TemplateService:
         return True
 
     # =====================================================
-    # Fork 系统模板
+    # Fork 公共模板
     # =====================================================
     async def duplicate_template(
         self,
@@ -162,7 +162,7 @@ class TemplateService:
         user_id: UUID,
         template_id: UUID,
     ) -> Optional[PosterTemplate]:
-        """将系统模板复制为个人模板"""
+        """将公共模板复制为个人模板"""
         source = await self.get_template(db, template_id=template_id)
         if source is None:
             return None
@@ -181,6 +181,38 @@ class TemplateService:
         await db.flush()
         await db.refresh(forked)
         return forked
+
+    # =====================================================
+    # 发布个人模板为公共模板
+    # =====================================================
+    async def publish_template(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: UUID,
+        template_id: UUID,
+    ) -> Optional[PosterTemplate]:
+        """将自己的个人模板复制为公共模板"""
+        source = await self.get_template(db, template_id=template_id)
+        if source is None or source.user_id != user_id or source.is_system:
+            return None
+
+        published = PosterTemplate(
+            user_id=None,
+            is_system=True,
+            name=source.name,
+            description=source.description,
+            category=source.category,
+            style_tag=source.style_tag,
+            config=json.loads(json.dumps(source.config)) if source.config else {},
+            thumbnail_url=source.thumbnail_url,
+            source_generation_id=source.source_generation_id,
+            use_count=0,
+        )
+        db.add(published)
+        await db.flush()
+        await db.refresh(published)
+        return published
 
     # =====================================================
     # 使用次数 +1

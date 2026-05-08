@@ -8,9 +8,12 @@ from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
+from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.db import get_async_session
 from app.dependencies.auth import get_current_user_optional
 from app.models.user import User
+from app.services.brand_service import brand_service
 from app.services.batch_service import batch_service
 
 router = APIRouter(prefix="/poster/batch", tags=["Poster Batch"])
@@ -81,6 +84,7 @@ async def batch_generate(
     req: BatchGenerateRequest,
     background_tasks: BackgroundTasks,
     current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_async_session),
 ):
     """
     提交批量生成任务
@@ -90,6 +94,12 @@ async def batch_generate(
     - 最大并发数: 3
     """
     try:
+        brand_kit = None
+        if current_user:
+            kit = await brand_service.get_brand_kit(db, user_id=current_user.id)
+            if kit:
+                brand_kit = brand_service.serialize(kit)
+
         # 构建共享配置
         shared_config = {
             "mode": req.mode,
@@ -98,6 +108,7 @@ async def batch_generate(
             "style_tags": req.style_tags,
             "template_index": req.template_index,
             "series_mode": req.series_mode,
+            "brand_kit": brand_kit,
         }
 
         # 转换 items

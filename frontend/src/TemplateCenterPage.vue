@@ -31,7 +31,7 @@
     <div class="max-w-7xl mx-auto mb-8">
       <div class="inline-flex p-1.5 bg-white border border-slate-200 rounded-2xl shadow-sm">
         <button 
-          v-for="tab in [{id: 'mine', label: '我的模板', icon: '👤'}, {id: 'system', label: '系统模板', icon: '🏢'}]" 
+          v-for="tab in [{id: 'mine', label: '我的模板', icon: '👤'}, {id: 'system', label: '公共模板', icon: '🏛️'}]" 
           :key="tab.id"
           @click="currentTab = tab.id"
           :class="[
@@ -72,6 +72,7 @@
           @edit="openEditModal(tpl)"
           @delete="handleDelete(tpl)"
           @duplicate="handleDuplicate(tpl)"
+          @publish="handlePublish(tpl)"
         />
       </div>
       
@@ -82,7 +83,7 @@
           <svg v-else xmlns="http://www.w3.org/2000/svg" class="w-12 h-12 text-slate-400" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><path d="M9 22v-4h6v4"/><path d="M8 6h.01"/><path d="M16 6h.01"/><path d="M12 6h.01"/><path d="M12 10h.01"/><path d="M12 14h.01"/><path d="M16 10h.01"/><path d="M16 14h.01"/><path d="M8 10h.01"/><path d="M8 14h.01"/></svg>
         </div>
         <h3 class="text-xl font-bold text-slate-800 mb-2">
-          {{ currentTab === 'mine' ? '您的创意工坊虚位以待' : '系统模板正在准备中' }}
+          {{ currentTab === 'mine' ? '您的创意工坊虚位以待' : '公共模板正在准备中' }}
         </h3>
         <p class="text-slate-400 max-w-md mx-auto mb-8 leading-relaxed">
           {{ currentTab === 'mine' 
@@ -115,7 +116,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import TemplatePreview from './components/template/TemplatePreview.vue'
 import TemplateEditor from './components/template/TemplateEditor.vue'
-import { getTemplatesList, deleteTemplate, saveTemplate, duplicateTemplate } from './api.js'
+import { getTemplatesList, deleteTemplate, saveTemplate, duplicateTemplate, publishTemplate } from './api.js'
 
 const router = useRouter()
 
@@ -193,6 +194,17 @@ async function handleDuplicate(tpl) {
     currentTab.value = 'mine' // 切换到我的模板
   } catch (e) {
     alert(`复制失败: ${e.message}`)
+  }
+}
+
+async function handlePublish(tpl) {
+  if (!confirm(`发布后《${tpl.name}》会复制到公共模板，所有用户可见。继续？`)) return
+  try {
+    const published = await publishTemplate(tpl.id)
+    templates.value.unshift(published)
+    currentTab.value = 'system'
+  } catch (e) {
+    alert(`发布失败: ${e.response?.data?.detail || e.message}`)
   }
 }
 

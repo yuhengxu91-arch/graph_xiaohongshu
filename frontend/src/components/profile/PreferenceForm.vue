@@ -99,8 +99,8 @@ const engines = [
   { value: 'gemini',     icon: '💎', label: 'Gemini (xunruijie)', desc: 'gemini-3-pro-image-preview' },
   { value: 'gpt_image',  icon: '🖼️', label: 'GPT Image 2',        desc: 'OpenAI GPT Image 2 生图 (scdn)' },
   { value: 'doubao',     icon: '🎨', label: '豆包 Seedream',      desc: '火山方舟 doubao-seedream 生图' },
-  { value: 'jimeng',     icon: '🔮', label: '即梦',               desc: '火山引擎即梦 AI 生图' },
 ]
+const validEngineValues = new Set(engines.map(engine => engine.value))
 
 const form = ref({
   default_aspect_ratio: '3:4',
@@ -117,7 +117,11 @@ let timer = null
 // Init form from props
 watch(() => props.prefs, (newVal) => {
   if (newVal && Object.keys(newVal).length > 0) {
-    form.value = { ...form.value, ...newVal }
+    form.value = {
+      ...form.value,
+      ...newVal,
+      image_provider: validEngineValues.has(newVal.image_provider) ? newVal.image_provider : null,
+    }
   }
 }, { immediate: true })
 

@@ -19,6 +19,8 @@ load_dotenv()
 class ImageService:
     """图片生成服务类"""
 
+    SUPPORTED_PROVIDERS = {"gemini", "gemini_ch", "doubao", "gpt_image"}
+
     XHS_STYLE_PROMPT = """请根据以下内容生成一张小红书风格的爆款配图：
 
 【内容主题】
@@ -46,7 +48,8 @@ class ImageService:
     ]
 
     def __init__(self):
-        self.provider = os.getenv("IMAGE_PROVIDER", "gemini").lower()
+        configured_provider = os.getenv("IMAGE_PROVIDER", "gemini").lower()
+        self.provider = configured_provider if configured_provider in self.SUPPORTED_PROVIDERS else "gemini"
 
         # Gemini 代理 1（xunruijie）
         self.api_key = os.getenv("IMAGE_API_KEY", "")
@@ -66,15 +69,25 @@ class ImageService:
         self.image_dir = Path("static/images/generated")
         self.image_dir.mkdir(parents=True, exist_ok=True)
 
-        active_key = os.getenv("JIMENG_ACCESS_KEY", "") if self.provider == "jimeng" else self.api_key
+        active_key = self._get_provider_api_key(self.provider)
         if not active_key:
             print(f"[ImageService] 警告: API Key 未配置（当前引擎: {self.provider}），图片生成功能不可用")
 
     def _get_effective_provider(self, provider_override: Optional[str] = None) -> str:
         """获取实际使用的引擎，支持用户偏好覆盖"""
-        if provider_override and provider_override != "system":
+        if provider_override and provider_override != "system" and provider_override in self.SUPPORTED_PROVIDERS:
             return provider_override
         return self.provider
+
+    def _get_provider_api_key(self, provider: str) -> str:
+        """返回 provider 对应的 API Key，用于启动时配置检查。"""
+        if provider == "doubao":
+            return os.getenv("LLM_API_KEY", "")
+        if provider == "gemini_ch":
+            return self.api_key_ch
+        if provider == "gpt_image":
+            return self.gpt_image_api_key
+        return self.api_key
 
     def _build_api_url(self) -> str:
         return f"{self.base_url}/v1beta/models/{self.model}:generateContent"
@@ -96,8 +109,6 @@ class ImageService:
         effective = self._get_effective_provider(provider_override)
         if effective == "doubao":
             return await self._call_doubao_image_api(prompt)
-        if effective == "jimeng":
-            return await self._call_jimeng_api(prompt)
         if effective == "gpt_image":
             return await self._call_gpt_image_api(prompt)
         if effective == "gemini_ch":
@@ -247,46 +258,6 @@ class ImageService:
             return None
         except Exception as e:
             print(f"[ImageService] GPT-Image 请求异常: {e}")
-            return None
-
-    async def _call_jimeng_api(self, prompt: str) -> Optional[str]:
-        """调用火山引擎即梦图片生成 API"""
-        import os
-        from app.services._volcengine_sign import volcengine_signed_request
-
-        ak = os.getenv("JIMENG_ACCESS_KEY", "")
-        sk = os.getenv("JIMENG_SECRET_KEY", "")
-        if not ak or not sk:
-            print("[ImageService] 即梦 AK/SK 未配置")
-            return None
-
-        body_params = {
-            "req_key": "high_aes_general_v21_L",
-            "prompt": prompt,
-            "width": 1024,
-            "height": 1024,
-            "use_pre_llm": True,
-            "use_sr": True,
-            "return_url": True,
-            "logo_info": {"add_logo": False},
-        }
-
-        try:
-            result = await volcengine_signed_request(ak, sk, body_params)
-
-            if result.get("code") == 10000:
-                image_urls = result.get("data", {}).get("image_urls", [])
-                if image_urls:
-                    async with httpx.AsyncClient(timeout=60.0) as client:
-                        img_resp = await client.get(image_urls[0])
-                        img_resp.raise_for_status()
-                        return base64.b64encode(img_resp.content).decode("utf-8")
-
-            print(f"[ImageService] 即梦返回错误: code={result.get('code')}, msg={result.get('message', '')}")
-            return None
-
-        except Exception as e:
-            print(f"[ImageService] 即梦请求异常: {e}")
             return None
 
     async def generate_single_image(

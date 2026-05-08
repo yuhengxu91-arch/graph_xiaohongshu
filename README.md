@@ -94,7 +94,7 @@
 |------|------|
 | 用户资料 | 头像上传、昵称修改、密码修改 |
 | 创作统计 | 作品数、模板数、生成次数等数据概览 |
-| 引擎偏好 | 可切换 AI 图片生成引擎（Gemini / Doubao / 即梦） |
+| 引擎偏好 | 可切换 AI 图片生成引擎（Gemini / GPT Image / Doubao） |
 | 偏好设置 | 默认风格、色调等个性化配置 |
 
 ---
@@ -136,7 +136,7 @@ graph TB
 
     subgraph AI["🤖 AI 服务"]
         LLM["Doubao Seed 系列<br/>(选题/写作/改写)"]
-        IMG["图片生成引擎<br/>Gemini │ Doubao Seedream │ 即梦"]
+        IMG["图片生成引擎<br/>Gemini │ GPT Image │ Doubao Seedream"]
     end
 
     subgraph DB["🗄️ PostgreSQL 16"]
@@ -172,7 +172,7 @@ graph TB
 | 后端框架 | **FastAPI** (Python 3.13+) |
 | 工作流引擎 | **LangGraph 1.0+** |
 | 数据库 | **PostgreSQL 16** + SQLAlchemy 2.0 (async) + asyncpg |
-| AI 图片 | **Gemini API** / **火山引擎 Doubao (Seedream)** / **即梦** (多引擎切换) |
+| AI 图片 | **Gemini API** / **GPT Image** / **火山引擎 Doubao (Seedream)** (多引擎切换) |
 | AI 文案 | 火山引擎 Doubao (Seed 系列) / 通用 OpenAI 兼容 LLM |
 | 前端框架 | **Vue 3** + Vite |
 | 样式 | **TailwindCSS** (现代 UI 组件体系) |
@@ -241,7 +241,7 @@ LLM_MODEL=doubao-seed-1-8-251228
 LLM_MODEL_FAST=doubao-seed-1-6-flash-250828
 
 # ===== AI 图片引擎（多引擎切换）=====
-IMAGE_PROVIDER=gemini              # gemini / doubao / jimeng
+IMAGE_PROVIDER=gemini              # gemini / gemini_ch / doubao / gpt_image
 
 # Gemini 配置
 IMAGE_API_KEY=your_gemini_api_key
@@ -250,10 +250,6 @@ IMAGE_MODEL=gemini-3-pro-image-preview
 
 # 豆包生图（复用 LLM_API_KEY）
 DOUBAO_IMAGE_MODEL=doubao-seedream-4-5-251128
-
-# 即梦（火山引擎 AK/SK）
-JIMENG_ACCESS_KEY=your_access_key
-JIMENG_SECRET_KEY=your_secret_key
 
 # ===== 日志 =====
 LOG_LEVEL=INFO                     # DEBUG / INFO / WARNING / ERROR
@@ -442,8 +438,7 @@ graph_xiaohongshu/
 │   │   ├── brand_service.py          # 品牌包管理服务
 │   │   ├── profile_service.py        # 用户资料 & 偏好服务
 │   │   ├── llm_service.py            # LLM 服务封装（Doubao Seed）
-│   │   ├── image_service.py          # 图片生成服务（Gemini/Doubao/即梦）
-│   │   └── _volcengine_sign.py       # 火山引擎请求签名
+│   │   └── image_service.py          # 图片生成服务（Gemini/GPT Image/Doubao）
 │   ├── models/
 │   │   ├── poster.py                 # 海报 / 模板 / 风格标签 ORM
 │   │   ├── batch_task.py             # 批量任务 ORM
@@ -524,10 +519,10 @@ graph_xiaohongshu/
 ## ⚠️ 注意事项
 
 1. **数据库**: 确保 PostgreSQL 16+ 运行且可访问，或使用 `docker compose up` 自动拉起
-2. **API Key**: 在 `.env` 中配置对应引擎的 API Key（Gemini / Doubao / 即梦）
+2. **API Key**: 在 `.env` 中配置对应引擎的 API Key（Gemini / GPT Image / Doubao）
 3. **图片存储**: 生成的海报保存在 `static/images/posters/`，需确保目录可写
 4. **并发控制**: 批量生成使用 `Semaphore(3)` 限流；全平台导出使用 `Semaphore(2)` 限流
-5. **多引擎切换**: 用户可在个人中心设置 AI 图片引擎偏好，支持 Gemini、Doubao (Seedream)、即梦
+5. **多引擎切换**: 用户可在个人中心设置 AI 图片引擎偏好，支持 Gemini、GPT Image、Doubao (Seedream)
 6. **日志系统**: structlog JSON 结构化日志输出到 `logs/` 目录，内置 PII 脱敏
 7. **部署文档**: 详见 `DEPLOYMENT.md`（阿里云 SAE）和 `DEPLOYMENT_TENCENT.md`（腾讯云轻量服务器）
 

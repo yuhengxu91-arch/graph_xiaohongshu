@@ -11,7 +11,7 @@
         <!-- Tab 切换 -->
         <div class="inline-flex p-1 bg-white border border-slate-200 rounded-2xl shadow-sm self-start">
           <button 
-            v-for="tab in [{id: 'mine', label: '我的模板', icon: '👤'}, {id: 'system', label: '系统模板', icon: '🏢'}]" 
+            v-for="tab in [{id: 'mine', label: '我的模板', icon: '👤'}, {id: 'system', label: '公共模板', icon: '🏛️'}]" 
             :key="tab.id"
             @click="currentTab = tab.id"
             :class="[
@@ -42,8 +42,8 @@
       
       <!-- 空状态 -->
       <div v-else-if="templates.length > 0" class="py-20 flex flex-col items-center justify-center gap-4 border-2 border-dashed border-slate-100 rounded-3xl bg-slate-50/50">
-        <span class="text-4xl grayscale opacity-40">{{ currentTab === 'mine' ? '📂' : '🏢' }}</span>
-        <p class="text-slate-500 font-medium">{{ currentTab === 'mine' ? '您还没有创建过个人模板' : '暂无系统模板' }}</p>
+        <span class="text-4xl grayscale opacity-40">{{ currentTab === 'mine' ? '📂' : '🏛️' }}</span>
+        <p class="text-slate-500 font-medium">{{ currentTab === 'mine' ? '您还没有创建过个人模板' : '暂无公共模板' }}</p>
       </div>
       
       <!-- 加载中 -->

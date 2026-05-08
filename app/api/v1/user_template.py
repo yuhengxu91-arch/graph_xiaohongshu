@@ -1,6 +1,6 @@
 """
 用户模板中心 API 路由
-提供模板的列表、创建、更新、删除和 Fork 功能
+提供模板的列表、创建、更新、删除、Fork 和发布功能
 """
 from __future__ import annotations
 
@@ -116,7 +116,7 @@ async def delete_template(
     return {"success": True}
 
 
-@router.post("/{template_id}/duplicate", summary="Fork 系统模板为个人模板")
+@router.post("/{template_id}/duplicate", summary="Fork 公共模板为个人模板")
 async def duplicate_template(
     template_id: UUID,
     current_user: User = Depends(get_current_user),
@@ -133,3 +133,22 @@ async def duplicate_template(
             detail="源模板不存在",
         )
     return template_service.serialize(forked)
+
+
+@router.post("/{template_id}/publish", summary="发布个人模板为公共模板")
+async def publish_template(
+    template_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    published = await template_service.publish_template(
+        db,
+        user_id=current_user.id,
+        template_id=template_id,
+    )
+    if published is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="模板不存在或无权发布",
+        )
+    return template_service.serialize(published)

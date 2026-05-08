@@ -23,6 +23,8 @@ from app.models.brand import BrandKit
 class ProfileService:
     """个人中心服务"""
 
+    VALID_IMAGE_PROVIDERS = {"gemini", "gemini_ch", "doubao", "gpt_image"}
+
     def __init__(self) -> None:
         self.project_root = Path(__file__).resolve().parent.parent.parent
         self.static_root = self.project_root / "static"
@@ -225,6 +227,8 @@ class ProfileService:
         ]
         for field in updatable:
             if field in data:
+                if field == "image_provider" and data[field] not in self.VALID_IMAGE_PROVIDERS:
+                    data[field] = None
                 setattr(pref, field, data[field])
 
         pref.updated_at = datetime.utcnow()
@@ -252,7 +256,7 @@ class ProfileService:
             "default_mode": pref.default_mode,
             "default_style_tag": pref.default_style_tag,
             "auto_save_to_gallery": pref.auto_save_to_gallery,
-            "image_provider": pref.image_provider,
+            "image_provider": pref.image_provider if pref.image_provider in self.VALID_IMAGE_PROVIDERS else None,
             "custom_api_key": "***" if pref.custom_api_key else "",
         }
 

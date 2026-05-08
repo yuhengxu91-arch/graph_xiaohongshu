@@ -1,7 +1,12 @@
 import base64
+import io
 import os
+import tempfile
 import unittest
-from unittest.mock import patch
+from pathlib import Path
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 from app.services.poster_service import PosterService
 
@@ -109,6 +114,131 @@ class PosterServiceGeminiTests(unittest.IsolatedAsyncioTestCase):
             image = await service._call_gemini_api("生成一张海报", use_changhuai=True)
 
         self.assertEqual(image, "proxy-image")
+
+
+class PosterServiceProviderTests(unittest.TestCase):
+    def test_removed_system_provider_falls_back_to_gemini_on_startup(self):
+        with patch.dict(os.environ, {"IMAGE_PROVIDER": "jimeng", "IMAGE_API_KEY": "test-key"}):
+            service = PosterService()
+
+        self.assertEqual(service.provider, "gemini")
+
+    def test_unknown_provider_override_falls_back_to_system_provider(self):
+        service = PosterService()
+        service.provider = "doubao"
+
+        self.assertEqual(service._get_effective_provider("jimeng"), "doubao")
+        self.assertEqual(service._get_effective_provider("unknown"), "doubao")
+
+
+class PosterServiceBrandKitTests(unittest.IsolatedAsyncioTestCase):
+    async def test_generate_custom_injects_brand_kit_and_saves_with_brand_kit(self):
+        service = PosterService()
+        service._call_ai_image_api = AsyncMock(return_value=base64.b64encode(b"fake-png").decode("utf-8"))
+        service._save_image = MagicMock(return_value="/static/images/posters/branded.png")
+        brand_kit = {
+            "brand_name": "慢星咖啡",
+            "colors": ["#123456", "#F0E6D2"],
+            "font_style": "无衬线粗体",
+            "tone_prompt": "温柔克制，像精品咖啡师介绍单品豆。",
+            "banned_words": ["全网最低"],
+            "logo_url": "/static/brand_logos/logo.png",
+        }
+
+        result = await service.generate_custom(
+            prompt="新品冷萃上市海报",
+            brand_kit=brand_kit,
+        )
+
+        self.assertTrue(result["success"])
+        self.assertIn("慢星咖啡", result["prompt_used"])
+        self.assertIn("#123456", result["prompt_used"])
+        self.assertIn("温柔克制", result["prompt_used"])
+        self.assertIn("全网最低", result["prompt_used"])
+        service._save_image.assert_called_once()
+        self.assertEqual(service._save_image.call_args.kwargs["brand_kit"], brand_kit)
+
+    async def test_db_template_generation_injects_brand_kit(self):
+        service = PosterService()
+        service._call_ai_image_api = AsyncMock(return_value=base64.b64encode(b"fake-png").decode("utf-8"))
+        service._save_image = MagicMock(return_value="/static/images/posters/template.png")
+        brand_kit = {"brand_name": "云舟研习社", "colors": ["#0055FF"]}
+
+        result = await service.generate_from_db_template(
+            template_config={
+                "ai_prompt_template": "生成一张 {title} 主题海报，配色 {color_desc}。",
+                "text_slots": [{"name": "title", "label": "标题", "required": True}],
+            },
+            template_name="课程海报",
+            template_style_tag=None,
+            params={"title": "AI 写作课"},
+            brand_kit=brand_kit,
+        )
+
+        self.assertTrue(result["success"])
+        self.assertIn("云舟研习社", result["prompt_used"])
+        self.assertIn("#0055FF", result["prompt_used"])
+        self.assertEqual(service._save_image.call_args.kwargs["brand_kit"], brand_kit)
+
+    async def test_save_image_overlays_brand_logo_when_logo_url_exists(self):
+        from PIL import Image
+
+        service = PosterService()
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            service.project_root = root
+            service.output_dir = root / "static" / "images" / "posters"
+            service.output_dir.mkdir(parents=True)
+            logo_dir = root / "static" / "brand_logos"
+            logo_dir.mkdir(parents=True)
+
+            base = Image.new("RGBA", (200, 200), (255, 255, 255, 255))
+            base_io = io.BytesIO()
+            base.save(base_io, format="PNG")
+            base_b64 = base64.b64encode(base_io.getvalue()).decode("utf-8")
+
+            logo = Image.new("RGBA", (40, 20), (255, 0, 0, 255))
+            logo.save(logo_dir / "logo.png")
+
+            image_url = service._save_image(
+                base_b64,
+                prefix="brand_test",
+                brand_kit={"logo_url": "/static/brand_logos/logo.png"},
+            )
+
+            saved = Image.open(root / image_url.lstrip("/")).convert("RGBA")
+            self.assertEqual(saved.getpixel((180, 180)), (255, 0, 0, 255))
+
+
+class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
+    async def test_custom_generation_passes_current_user_brand_kit_to_service(self):
+        from app.api.v1 import poster as poster_api
+
+        brand_kit = SimpleNamespace(brand_name="慢星咖啡")
+        response_payload = {
+            "success": True,
+            "image_url": "/static/images/posters/branded.png",
+            "prompt_used": "branded prompt",
+            "aspect_ratio": "3:4",
+            "width": 1080,
+            "height": 1440,
+            "mode": "custom",
+        }
+        brand_service_mock = SimpleNamespace(get_brand_kit=AsyncMock(return_value=brand_kit))
+
+        with patch.object(poster_api.profile_service, "get_user_image_provider", AsyncMock(return_value=None)):
+            with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response_payload)) as generate_mock:
+                with patch.object(poster_api.gallery_service, "create_generation_record", AsyncMock()):
+                    with patch("app.api.v1.poster.brand_service", brand_service_mock, create=True):
+                        await poster_api.generate_custom(
+                            poster_api.CustomGenerateRequest(prompt="新品海报"),
+                            current_user=SimpleNamespace(id=uuid4()),
+                            db=object(),
+                        )
+
+        brand_service_mock.get_brand_kit.assert_awaited_once()
+        self.assertIs(generate_mock.call_args.kwargs["brand_kit"], brand_kit)
 
 
 if __name__ == "__main__":

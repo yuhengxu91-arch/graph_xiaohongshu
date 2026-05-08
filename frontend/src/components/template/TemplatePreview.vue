@@ -15,7 +15,7 @@
         {{ template.name.substring(0, 1) }}
       </div>
       
-      <!-- 悬停操作蒙层 (仅限非系统模板且非选择模式) -->
+      <!-- 悬停操作蒙层 (仅限个人模板且非选择模式) -->
       <div 
         v-if="!isSystem && !selectionMode" 
         class="absolute inset-0 bg-white/20 backdrop-blur-sm opacity-0 group-hover:opacity-100 transition-opacity duration-300 flex items-center justify-center gap-3"
@@ -36,9 +36,9 @@
         </button>
       </div>
 
-      <!-- 系统标识 -->
+      <!-- 公共标识 -->
       <div v-if="isSystem" class="absolute top-3 left-3 px-2 py-0.5 bg-blue-600 text-[10px] font-bold text-white rounded-md shadow-sm uppercase tracking-wider">
-        Official
+        Public
       </div>
     </div>
     
@@ -85,6 +85,14 @@
         <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
         Fork
       </button>
+      <button
+        v-if="!isSystem && !selectionMode"
+        @click.stop="$emit('publish')"
+        class="px-4 py-2 bg-white text-blue-700 text-xs font-bold rounded-xl border border-blue-100 hover:bg-blue-50 active:scale-95 transition-all flex items-center gap-1.5"
+      >
+        <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v14"/><path d="M5 12h14"/></svg>
+        发布公共
+      </button>
     </div>
   </div>
 </template>
@@ -107,7 +115,7 @@ const props = defineProps({
   }
 })
 
-defineEmits(['use', 'edit', 'delete', 'duplicate'])
+defineEmits(['use', 'edit', 'delete', 'duplicate', 'publish'])
 
 const placeholderBg = computed(() => {
   const hash = Array.from(props.template.name || 'T').reduce((acc, char) => acc + char.charCodeAt(0), 0)
