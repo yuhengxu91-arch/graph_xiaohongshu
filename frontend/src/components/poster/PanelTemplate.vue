@@ -156,14 +156,15 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
 import RatioSelector from './RatioSelector.vue'
 import TemplatePreview from '../template/TemplatePreview.vue'
 
 const props = defineProps({
   templates: { type: Array, default: () => [] },
   aspectRatios: { type: Array, default: () => [] },
-  generating: { type: Boolean, default: false }
+  generating: { type: Boolean, default: false },
+  prefill: { type: Object, default: null },
 })
 
 const emit = defineEmits(['generate'])
@@ -182,6 +183,7 @@ const form = ref({
   colorOption: '',
   aspectRatio: null,
 })
+const consumedPrefillKey = ref(null)
 
 onMounted(() => {
   const saved = sessionStorage.getItem('use_template')
@@ -209,6 +211,14 @@ onMounted(() => {
   }
 })
 
+watch(
+  [() => props.prefill, () => props.templates],
+  () => {
+    applyPrefill()
+  },
+  { immediate: true, deep: false },
+)
+
 const isValid = computed(() => {
   if (!selectedTemplate.value) return false
   const slots = selectedTemplate.value.text_slots || []
@@ -220,7 +230,7 @@ const isValid = computed(() => {
   return true
 })
 
-function selectTemplate(tpl) {
+function selectTemplate(tpl, overrides = {}) {
   // 兜底：确保从 config 中解构出关键字段（防止缓存/数据源未映射的情况）
   const resolved = {
     ...tpl,
@@ -232,13 +242,36 @@ function selectTemplate(tpl) {
   selectedTemplate.value = resolved
   const params = {}
   for (const slot of resolved.text_slots) {
-    params[slot.name] = ''
+    params[slot.name] = overrides.params?.[slot.name] ?? ''
+  }
+  for (const [key, value] of Object.entries(overrides.params || {})) {
+    if (!(key in params)) {
+      params[key] = value
+    }
   }
   form.value = {
     params,
-    colorOption: resolved.color_options?.[0] || '',
-    aspectRatio: null,
+    colorOption: overrides.colorOption ?? resolved.color_options?.[0] ?? '',
+    aspectRatio: overrides.aspectRatio ?? null,
   }
+}
+
+function applyPrefill() {
+  const prefill = props.prefill
+  if (!prefill || prefill.mode !== 'template') return
+  const key = prefill.remix_key || JSON.stringify(prefill)
+  if (consumedPrefillKey.value === key) return
+
+  const tpl = props.templates.find(item => item.id === prefill.template_id)
+  if (!tpl) return
+
+  currentTab.value = tpl.is_system ? 'system' : 'mine'
+  selectTemplate(tpl, {
+    params: prefill.params || {},
+    colorOption: prefill.color_option || '',
+    aspectRatio: prefill.aspect_ratio || null,
+  })
+  consumedPrefillKey.value = key
 }
 
 

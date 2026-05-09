@@ -78,11 +78,16 @@
 
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
+import { useRouter } from 'vue-router'
 import GalleryFilter from './components/gallery/GalleryFilter.vue'
 import GalleryGrid from './components/gallery/GalleryGrid.vue'
 import GalleryDetail from './components/gallery/GalleryDetail.vue'
 import BatchToolbar from './components/gallery/BatchToolbar.vue'
 import ConfirmModal from './components/common/ConfirmModal.vue'
+import {
+  buildPosterRemixPayload,
+  savePosterRemixPayload,
+} from './utils/posterRemix.js'
 
 import {
   getGalleryList,
@@ -93,6 +98,8 @@ import {
   batchDeleteWorks,
   batchTagWorks,
 } from './api.js'
+
+const router = useRouter()
 
 // ============== 状态 ==============
 const loading = ref(false)
@@ -255,7 +262,10 @@ async function handleDeleteWork(id) {
 }
 
 function remixWork(item) {
-  alert(`【即将支持】将此作品（模式：${item.mode}）的参数回填到海报生成面板进行二次编辑。`)
+  const payload = buildPosterRemixPayload(item)
+  savePosterRemixPayload(sessionStorage, payload)
+  selectedItem.value = null
+  router.push({ name: 'poster', query: { tab: payload.target_tab, remix: item.id } })
 }
 
 // ============== 批量操作 ==============

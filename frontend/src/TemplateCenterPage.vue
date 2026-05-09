@@ -108,6 +108,27 @@
       @close="showEditor = false"
       @save="handleSaveTemplate"
     />
+
+    <!-- 确认弹窗 -->
+    <ConfirmModal
+      :is-open="confirmModal.isOpen"
+      :title="confirmModal.title"
+      :message="confirmModal.message"
+      :confirm-text="confirmModal.confirmText"
+      :cancel-text="confirmModal.cancelText"
+      :danger="confirmModal.danger"
+      @confirm="handleConfirm"
+      @cancel="handleCancelConfirm"
+    />
+
+    <!-- 消息提示 (Toast) -->
+    <Transition name="fade">
+      <div v-if="toastMessage" class="fixed top-8 right-8 z-[100] p-4 rounded-xl shadow-lg shadow-black/5 border text-sm font-medium transition-all max-w-sm flex items-start gap-3"
+           :class="toastType === 'error' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'">
+        <span class="text-lg leading-none mt-0.5">{{ toastType === 'error' ? '⚠️' : '✅' }}</span>
+        <span class="flex-1">{{ toastMessage }}</span>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -116,6 +137,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import TemplatePreview from './components/template/TemplatePreview.vue'
 import TemplateEditor from './components/template/TemplateEditor.vue'
+import ConfirmModal from './components/common/ConfirmModal.vue'
 import { getTemplatesList, deleteTemplate, saveTemplate, duplicateTemplate, publishTemplate } from './api.js'
 
 const router = useRouter()
@@ -126,6 +148,54 @@ const loading = ref(false)
 
 const showEditor = ref(false)
 const editingTemplate = ref(null)
+
+// Toast State
+const toastMessage = ref('')
+const toastType = ref('info')
+
+function showToast(msg, type = 'info') {
+  toastMessage.value = msg
+  toastType.value = type
+  setTimeout(() => {
+    toastMessage.value = ''
+  }, 3000)
+}
+
+// Confirm Modal State
+const confirmModal = ref({
+  isOpen: false,
+  title: '确认操作',
+  message: '',
+  confirmText: '确定',
+  cancelText: '取消',
+  danger: false,
+  resolve: null
+})
+
+function showConfirm(options) {
+  return new Promise((resolve) => {
+    confirmModal.value = {
+      ...confirmModal.value,
+      ...options,
+      isOpen: true,
+      resolve
+    }
+  })
+}
+
+function handleConfirm() {
+  if (confirmModal.value.resolve) {
+    confirmModal.value.resolve(true)
+  }
+  confirmModal.value.isOpen = false
+}
+
+function handleCancelConfirm() {
+  if (confirmModal.value.resolve) {
+    confirmModal.value.resolve(false)
+  }
+  confirmModal.value.isOpen = false
+}
 
 const filteredTemplates = computed(() => {
   return templates.value.filter(t => {
@@ -172,18 +242,28 @@ async function handleSaveTemplate(data) {
       templates.value.unshift(saved)
     }
     showEditor.value = false
+    showToast('保存成功', 'success')
   } catch (e) {
-    alert(`保存失败: ${e.message}`)
+    showToast(`保存失败: ${e.message}`, 'error')
   }
 }
 
 async function handleDelete(tpl) {
-  if (!confirm(`确定要删除模板《${tpl.name}》吗？`)) return
+  const confirmed = await showConfirm({
+    title: '删除模板',
+    message: `确定要删除模板《${tpl.name}》吗？此操作不可恢复。`,
+    confirmText: '确认删除',
+    cancelText: '取消',
+    danger: true
+  })
+  if (!confirmed) return
+
   try {
     await deleteTemplate(tpl.id)
     templates.value = templates.value.filter(t => t.id !== tpl.id)
+    showToast('删除成功', 'success')
   } catch (e) {
-    alert(`删除失败: ${e.message}`)
+    showToast(`删除失败: ${e.message}`, 'error')
   }
 }
 
@@ -192,19 +272,29 @@ async function handleDuplicate(tpl) {
     const duplicated = await duplicateTemplate(tpl.id || tpl.name)
     templates.value.unshift(duplicated)
     currentTab.value = 'mine' // 切换到我的模板
+    showToast('复制成功', 'success')
   } catch (e) {
-    alert(`复制失败: ${e.message}`)
+    showToast(`复制失败: ${e.message}`, 'error')
   }
 }
 
 async function handlePublish(tpl) {
-  if (!confirm(`发布后《${tpl.name}》会复制到公共模板，所有用户可见。继续？`)) return
+  const confirmed = await showConfirm({
+    title: '发布模板',
+    message: `发布后《${tpl.name}》会复制到公共模板，所有用户可见。继续？`,
+    confirmText: '确定发布',
+    cancelText: '取消',
+    danger: false
+  })
+  if (!confirmed) return
+
   try {
     const published = await publishTemplate(tpl.id)
     templates.value.unshift(published)
     currentTab.value = 'system'
+    showToast('发布成功', 'success')
   } catch (e) {
-    alert(`发布失败: ${e.response?.data?.detail || e.message}`)
+    showToast(`发布失败: ${e.response?.data?.detail || e.message}`, 'error')
   }
 }
 
@@ -213,3 +303,8 @@ function useTemplate(tpl) {
   router.push({ name: 'poster', query: { tab: 'template', tpl_id: tpl.id } })
 }
 </script>
+
+<style scoped>
+.fade-enter-active, .fade-leave-active { transition: opacity 0.3s ease; }
+.fade-enter-from, .fade-leave-to { opacity: 0; }
+</style>

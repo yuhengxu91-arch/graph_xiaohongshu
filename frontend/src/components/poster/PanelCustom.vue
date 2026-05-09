@@ -125,14 +125,15 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import RatioSelector from './RatioSelector.vue'
 import { generatePromptOnly } from '../../api.js'
 
 const props = defineProps({
   styleTags: { type: Array, default: () => [] },
   aspectRatios: { type: Array, default: () => [] },
-  generating: { type: Boolean, default: false }
+  generating: { type: Boolean, default: false },
+  prefill: { type: Object, default: null },
 })
 
 const emit = defineEmits(['generate'])
@@ -148,6 +149,23 @@ const generatingPrompt = ref(false)
 const generatedPrompt = ref(null)
 const promptMeta = ref({})
 const copied = ref(false)
+const consumedPrefillKey = ref(null)
+
+watch(() => props.prefill, (prefill) => {
+  if (!prefill || prefill.mode !== 'custom') return
+  const key = prefill.remix_key || JSON.stringify(prefill)
+  if (consumedPrefillKey.value === key) return
+
+  form.value = {
+    prompt: prefill.prompt || '',
+    selectedStyles: Array.isArray(prefill.selected_styles) ? [...prefill.selected_styles] : [],
+    aspectRatio: prefill.aspect_ratio || '3:4',
+    colorTone: prefill.color_tone || '',
+  }
+  generatedPrompt.value = null
+  copied.value = false
+  consumedPrefillKey.value = key
+}, { immediate: true })
 
 function toggleStyle(name) {
   const idx = form.value.selectedStyles.indexOf(name)

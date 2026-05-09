@@ -10,7 +10,7 @@
           :class="activeTab === tab.id 
             ? 'bg-blue-600 text-white shadow-md shadow-blue-600/20' 
             : 'text-slate-500 hover:text-slate-800 hover:bg-slate-50'"
-          @click="activeTab = tab.id; generatedResult = null"
+          @click="switchTab(tab.id)"
         >
           <span>{{ tab.icon }}</span>
           <span>{{ tab.label }}</span>
@@ -30,6 +30,7 @@
           :aspectRatios="aspectRatios"
           :templates="templates"
           :generating="generating"
+          :prefill="panelPrefill"
           @generate="handleGenerateDispatch"
         />
 
@@ -94,6 +95,10 @@ import {
   getPosterStyles,
   getPosterAspectRatios,
 } from './api.js'
+import {
+  consumePosterRemixPayload,
+  resolvePosterRemixTarget,
+} from './utils/posterRemix.js'
 
 const route = useRoute()
 
@@ -101,6 +106,7 @@ const route = useRoute()
 const activeTab = ref(route.query.tab || 'batch')
 const generating = ref(false)
 const generatedResult = ref(null)
+const panelPrefill = ref(null)
 
 const tabs = [
   { id: 'batch', label: '批量生成', icon: '📦' },
@@ -150,7 +156,24 @@ onMounted(async () => {
     loadTemplates(),
     loadAspectRatios(),
   ])
+  consumeRemixWork()
 })
+
+function switchTab(tabId) {
+  activeTab.value = tabId
+  generatedResult.value = null
+  panelPrefill.value = null
+}
+
+function consumeRemixWork() {
+  const payload = consumePosterRemixPayload(sessionStorage)
+  const target = resolvePosterRemixTarget(payload, templates.value)
+  if (!target) return
+
+  activeTab.value = target.tab
+  generatedResult.value = null
+  panelPrefill.value = target.prefill
+}
 
 // ============== 本地缓存工具函数 ==============
 function getCachedData(key) {
