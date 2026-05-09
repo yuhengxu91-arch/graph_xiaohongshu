@@ -119,6 +119,13 @@
 
       <!-- 操作按钮 -->
       <div class="flex flex-col sm:flex-row gap-4 pt-6">
+        <button
+          v-if="canSyncToSales"
+          class="flex-1 bg-emerald-600 hover:bg-emerald-700 text-white font-black py-4 rounded-2xl shadow-xl shadow-emerald-600/20 transition-all flex items-center justify-center gap-2 border-b-4 border-emerald-800 active:border-b-0 active:translate-y-1"
+          @click="openSalesModal"
+        >
+          <span>🔗</span> 关联销售系统
+        </button>
         <button class="flex-1 bg-blue-600 hover:bg-blue-700 text-white font-black py-4 rounded-2xl shadow-xl shadow-blue-600/20 transition-all flex items-center justify-center gap-2 border-b-4 border-blue-800 active:border-b-0 active:translate-y-1" @click="$emit('reset')">
           <span>🎨</span> 继续创作
         </button>
@@ -138,12 +145,20 @@
         尝试修复并重试
       </button>
     </div>
+
+    <SalesSyncModal
+      v-if="result?.image_url"
+      :is-open="salesModalOpen"
+      :image-url="result.image_url"
+      @close="salesModalOpen = false"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { getBatchStatus } from '../../api.js'
+import SalesSyncModal from '../common/SalesSyncModal.vue'
 
 const props = defineProps({
   result: { type: Object, default: null }
@@ -161,6 +176,7 @@ function getImageUrl(url) {
 
 const batchStatus = ref(null)
 const batchPolling = ref(false)
+const salesModalOpen = ref(false)
 let pollTimer = null
 
 const batchProgress = computed(() => {
@@ -179,6 +195,19 @@ const batchStatusLabel = computed(() => {
   if (s === 'failed') return '全部失败'
   return s
 })
+
+const canSyncToSales = computed(() => {
+  if (!props.result?.success || !props.result?.image_url) return false
+  return !['batch', 'export_all'].includes(props.result.mode)
+})
+
+function openSalesModal() {
+  salesModalOpen.value = true
+}
+
+function resetSalesState() {
+  salesModalOpen.value = false
+}
 
 async function pollBatch(taskId) {
   batchPolling.value = true
@@ -202,6 +231,7 @@ watch(() => props.result, (val) => {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
   batchStatus.value = null
   batchPolling.value = false
+  resetSalesState()
 
   if (val?.success && val?.mode === 'batch' && val?.task_id) {
     pollBatch(val.task_id)

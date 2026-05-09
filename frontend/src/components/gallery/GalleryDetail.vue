@@ -104,6 +104,13 @@
           >
             🚀 基于此作品进行二次创作
           </button>
+          <button
+            v-if="item.image_url"
+            class="col-span-2 py-4 bg-emerald-600 hover:bg-emerald-700 text-white rounded-2xl font-bold shadow-lg shadow-emerald-600/20 active:scale-[0.98] transition-all flex items-center justify-center gap-2"
+            @click="salesModalOpen = true"
+          >
+            🔗 关联销售系统
+          </button>
           <button 
             class="py-3 bg-white border border-slate-200 text-slate-700 rounded-2xl font-bold hover:bg-slate-50 transition-all flex items-center justify-center gap-2"
             @click="$emit('toggle-favorite', item.id)"
@@ -119,10 +126,21 @@
         </div>
       </div>
     </div>
+
+    <SalesSyncModal
+      v-if="item.image_url"
+      :is-open="salesModalOpen"
+      :image-url="item.image_url"
+      :default-title="item.title || '喜报'"
+      @close="salesModalOpen = false"
+    />
   </div>
 </template>
 
 <script setup>
+import { ref, watch } from 'vue'
+import SalesSyncModal from '../common/SalesSyncModal.vue'
+
 const props = defineProps({
   item: {
     type: Object,
@@ -131,6 +149,11 @@ const props = defineProps({
 })
 
 const emit = defineEmits(['close', 'toggle-favorite', 'delete', 'remix'])
+const salesModalOpen = ref(false)
+
+watch(() => props.item.id, () => {
+  salesModalOpen.value = false
+})
 
 function formatMode(mode) {
   const map = {

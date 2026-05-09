@@ -8,12 +8,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_async_session
-from app.dependencies.auth import get_current_user_optional
+from app.dependencies.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.services.brand_service import brand_service
 from app.services.poster_service import poster_service
 from app.services.gallery_service import gallery_service
 from app.services.profile_service import profile_service
+from app.services.sales_sync_service import SalesSyncError, sales_sync_service
 
 router = APIRouter(prefix="/poster", tags=["Poster"])
 
@@ -65,6 +66,24 @@ class GenerateResponse(BaseModel):
     style_tags: Optional[List[str]] = Field(None, description="使用的风格标签")
     strength: Optional[str] = Field(None, description="迁移强度")
     error: Optional[str] = Field(None, description="错误信息")
+
+
+class SalesSyncRequest(BaseModel):
+    """同步喜报到销售系统请求"""
+    image_url: str = Field(..., description="本系统生成的图片地址")
+    query: Optional[str] = Field(None, description="学员姓名或手机号")
+    student_id: Optional[int] = Field(None, description="已确认的销售系统学员 ID")
+    title: Optional[str] = Field(None, description="同步到销售系统的素材标题")
+
+
+class SalesSyncResponse(BaseModel):
+    """同步喜报到销售系统响应"""
+    success: bool
+    status: str
+    message: str
+    student: Optional[Dict[str, Any]] = None
+    material: Optional[Dict[str, Any]] = None
+    candidates: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 async def _auto_save_generation(
@@ -179,6 +198,27 @@ async def get_aspect_ratios():
             for k, v in ratios.items()
         ]
     }
+
+
+@router.post("/sales-sync", response_model=SalesSyncResponse, summary="同步喜报到销售系统")
+async def sync_report_to_sales(
+    req: SalesSyncRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """
+    将已生成的喜报图片同步到销售系统，并按学员姓名/手机号或学员 ID 绑定。
+    """
+    try:
+        result = await sales_sync_service.sync_report(
+            image_url=req.image_url,
+            query=req.query,
+            student_id=req.student_id,
+            title=req.title,
+            uploaded_by=current_user.username,
+        )
+        return SalesSyncResponse(**result)
+    except SalesSyncError as e:
+        raise HTTPException(status_code=e.status_code, detail=e.detail) from e
 
 
 # ======================== 提示词生成接口 ========================

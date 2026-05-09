@@ -486,6 +486,15 @@ export async function generateExportAll(data) {
   return res.data
 }
 
+/**
+ * 将生成的喜报同步到销售系统并关联学员
+ * @param {Object} data - { image_url, query?, student_id?, title? }
+ */
+export async function syncPosterToSalesSystem(data) {
+  const res = await api.post('/poster/sales-sync', data)
+  return res.data
+}
+
 // ============== 作品库 / 素材中心 API ==============
 
 /**

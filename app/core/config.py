@@ -45,6 +45,14 @@ class Settings(BaseSettings):
     
     # 是否启用 PII 脱敏（邮箱、信用卡、API Key、手机号）
     log_pii_anonymize: bool = True
+
+    # ============== 销售系统对接配置 ==============
+    # AiWxChat / 销售系统后端地址，例如 http://127.0.0.1:8010
+    sales_api_base_url: str = ""
+    # 如销售系统部署层需要 Bearer Token，可在这里配置；本地 AiWxChat 当前素材/学员接口不强制认证
+    sales_api_token: str = ""
+    sales_api_timeout: float = 30.0
+    sales_uploaded_by: str = "graph_xiaohongshu"
     
     # ============== JWT 认证配置 ==============
     jwt_secret_key: str = "your-super-secret-key-change-in-production-2024"
