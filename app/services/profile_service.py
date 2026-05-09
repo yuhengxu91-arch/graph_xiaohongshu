@@ -204,6 +204,7 @@ class ProfileService:
                 "default_style_tag": None,
                 "auto_save_to_gallery": True,
                 "image_provider": None,
+                "image_model_config_id": None,
                 "custom_api_key": "",
             }
         return self._serialize_prefs(pref)
@@ -223,13 +224,28 @@ class ProfileService:
         updatable = [
             "default_aspect_ratio", "default_mode",
             "default_style_tag", "auto_save_to_gallery",
-            "image_provider", "custom_api_key",
+            "image_provider", "image_model_config_id", "custom_api_key",
         ]
         for field in updatable:
             if field in data:
                 if field == "image_provider" and data[field] not in self.VALID_IMAGE_PROVIDERS:
                     data[field] = None
+                if field == "image_model_config_id" and data[field]:
+                    from app.services.image_model_service import image_model_service
+
+                    config = await image_model_service.get_config(
+                        db,
+                        config_id=data[field],
+                        active_only=True,
+                    )
+                    if not config:
+                        raise ValueError("选择的图片模型不存在或未启用")
                 setattr(pref, field, data[field])
+
+        if "image_model_config_id" in data and data.get("image_model_config_id"):
+            pref.image_provider = None
+        if "image_provider" in data and data.get("image_provider"):
+            pref.image_model_config_id = None
 
         pref.updated_at = datetime.utcnow()
         await db.flush()
@@ -257,6 +273,7 @@ class ProfileService:
             "default_style_tag": pref.default_style_tag,
             "auto_save_to_gallery": pref.auto_save_to_gallery,
             "image_provider": pref.image_provider if pref.image_provider in self.VALID_IMAGE_PROVIDERS else None,
+            "image_model_config_id": str(pref.image_model_config_id) if pref.image_model_config_id else None,
             "custom_api_key": "***" if pref.custom_api_key else "",
         }
 
@@ -274,6 +291,29 @@ class ProfileService:
         result = await db.execute(stmt)
         row = result.scalar_one_or_none()
         return row  # None = 跟随系统
+
+    async def get_user_image_model_config(
+        self, db: AsyncSession, *, user_id: UUID
+    ) -> Optional[dict[str, Any]]:
+        """查询用户选择的公共图片模型配置，None 表示未选择动态模型。"""
+        stmt = select(UserPreference.image_model_config_id).where(
+            UserPreference.user_id == user_id
+        )
+        result = await db.execute(stmt)
+        config_id = result.scalar_one_or_none()
+        if not config_id:
+            return None
+
+        from app.services.image_model_service import image_model_service
+
+        config = await image_model_service.get_config(
+            db,
+            config_id=config_id,
+            active_only=True,
+        )
+        if not config:
+            return None
+        return image_model_service.runtime_config(config)
 
 
 # 模块级单例

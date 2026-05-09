@@ -15,6 +15,8 @@ from app.dependencies.auth import get_current_user_optional
 from app.models.user import User
 from app.services.brand_service import brand_service
 from app.services.batch_service import batch_service
+from app.services.image_model_service import image_model_service
+from app.services.profile_service import profile_service
 
 router = APIRouter(prefix="/poster/batch", tags=["Poster Batch"])
 
@@ -95,10 +97,25 @@ async def batch_generate(
     """
     try:
         brand_kit = None
+        image_provider = None
+        image_model_config = None
         if current_user:
             kit = await brand_service.get_brand_kit(db, user_id=current_user.id)
             if kit:
                 brand_kit = brand_service.serialize(kit)
+            image_provider = await profile_service.get_user_image_provider(
+                db,
+                user_id=current_user.id,
+            )
+            image_model_config = await profile_service.get_user_image_model_config(
+                db,
+                user_id=current_user.id,
+            )
+
+        if not image_provider and not image_model_config:
+            default_model = await image_model_service.get_default_config(db)
+            if default_model:
+                image_model_config = image_model_service.runtime_config(default_model)
 
         # 构建共享配置
         shared_config = {
@@ -109,6 +126,8 @@ async def batch_generate(
             "template_index": req.template_index,
             "series_mode": req.series_mode,
             "brand_kit": brand_kit,
+            "image_provider": image_provider,
+            "image_model_config": image_model_config,
         }
 
         # 转换 items

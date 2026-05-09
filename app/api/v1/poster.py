@@ -11,6 +11,7 @@ from app.core.db import get_async_session
 from app.dependencies.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.services.brand_service import brand_service
+from app.services.image_model_service import image_model_service
 from app.services.poster_service import poster_service
 from app.services.gallery_service import gallery_service
 from app.services.profile_service import profile_service
@@ -132,6 +133,31 @@ async def _get_user_brand_kit(
     if not user:
         return None
     return await brand_service.get_brand_kit(db, user_id=user.id)
+
+
+async def _get_user_image_model_config(
+    db: AsyncSession,
+    user: Optional[User],
+    provider: Optional[str],
+) -> Optional[Dict[str, Any]]:
+    """
+    获取当前应使用的公共图片模型配置。
+
+    用户显式选择公共模型时优先；若未选择旧版 provider，则使用管理员设定的默认公共模型；
+    都不存在时返回 None，继续走 .env / 旧版 provider 配置。
+    """
+    if user:
+        selected = await profile_service.get_user_image_model_config(db, user_id=user.id)
+        if selected:
+            return selected
+
+    if provider:
+        return None
+
+    default_config = await image_model_service.get_default_config(db)
+    if not default_config:
+        return None
+    return image_model_service.runtime_config(default_config)
 
 
 # ======================== 查询接口 ========================
@@ -259,12 +285,14 @@ async def generate_custom(
     try:
         provider = await _get_user_provider(db, current_user)
         brand_kit = await _get_user_brand_kit(db, current_user)
+        image_model_config = await _get_user_image_model_config(db, current_user, provider)
         result = await poster_service.generate_custom(
             prompt=req.prompt,
             style_tags=req.style_tags,
             aspect_ratio=req.aspect_ratio,
             color_tone=req.color_tone,
             provider_override=provider,
+            image_model_config=image_model_config,
             brand_kit=brand_kit,
         )
         await _auto_save_generation(
@@ -298,6 +326,7 @@ async def generate_from_template(
     try:
         provider = await _get_user_provider(db, current_user)
         brand_kit = await _get_user_brand_kit(db, current_user)
+        image_model_config = await _get_user_image_model_config(db, current_user, provider)
 
         # 统一通过 template_id 从数据库查找（包含个人模板和系统模板）
         from app.services.template_service import template_service
@@ -317,6 +346,7 @@ async def generate_from_template(
             color_option=req.color_option,
             aspect_ratio=req.aspect_ratio,
             provider_override=provider,
+            image_model_config=image_model_config,
             brand_kit=brand_kit,
         )
         
@@ -353,11 +383,13 @@ async def generate_edit(
     """
     try:
         provider = await _get_user_provider(db, current_user)
+        image_model_config = await _get_user_image_model_config(db, current_user, provider)
         result = await poster_service.generate_edit(
             image_base64=req.image_base64,
             edit_prompt=req.edit_prompt,
             aspect_ratio=req.aspect_ratio,
             provider_override=provider,
+            image_model_config=image_model_config,
         )
         await _auto_save_generation(
             db=db,
@@ -390,12 +422,14 @@ async def generate_style_transfer(
     """
     try:
         provider = await _get_user_provider(db, current_user)
+        image_model_config = await _get_user_image_model_config(db, current_user, provider)
         result = await poster_service.generate_style_transfer(
             image_base64=req.image_base64,
             style_tags=req.style_tags,
             strength=req.strength,
             aspect_ratio=req.aspect_ratio,
             provider_override=provider,
+            image_model_config=image_model_config,
         )
         await _auto_save_generation(
             db=db,
@@ -443,12 +477,14 @@ async def generate_inpaint(
     """
     try:
         provider = await _get_user_provider(db, current_user)
+        image_model_config = await _get_user_image_model_config(db, current_user, provider)
         result = await poster_service.generate_inpaint(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
             inpaint_prompt=req.inpaint_prompt,
             aspect_ratio=req.aspect_ratio,
             provider_override=provider,
+            image_model_config=image_model_config,
         )
         await _auto_save_generation(
             db=db,
@@ -477,10 +513,12 @@ async def generate_erase(
     """
     try:
         provider = await _get_user_provider(db, current_user)
+        image_model_config = await _get_user_image_model_config(db, current_user, provider)
         result = await poster_service.generate_erase(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
             provider_override=provider,
+            image_model_config=image_model_config,
         )
         await _auto_save_generation(
             db=db,
@@ -537,6 +575,7 @@ async def generate_adapt(
     """
     try:
         provider = await _get_user_provider(db, current_user)
+        image_model_config = await _get_user_image_model_config(db, current_user, provider)
         result = await poster_service.generate_adapt(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
@@ -544,6 +583,7 @@ async def generate_adapt(
             strategy=req.strategy,
             outpaint_prompt=req.outpaint_prompt,
             provider_override=provider,
+            image_model_config=image_model_config,
         )
         await _auto_save_generation(
             db=db,
@@ -572,12 +612,14 @@ async def generate_export_all(
     """
     try:
         provider = await _get_user_provider(db, current_user)
+        image_model_config = await _get_user_image_model_config(db, current_user, provider)
         result = await poster_service.generate_export_all(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
             strategy=req.strategy,
             outpaint_prompt=req.outpaint_prompt,
             provider_override=provider,
+            image_model_config=image_model_config,
         )
         await _auto_save_generation(
             db=db,

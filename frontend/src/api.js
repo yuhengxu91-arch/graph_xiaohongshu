@@ -713,6 +713,35 @@ export async function updatePreferences(data) {
   return res.data
 }
 
+// ============== 公共图片模型 API ==============
+
+export async function getImageModels(includeInactive = false) {
+  const res = await api.get('/image-models/list', {
+    params: { include_inactive: includeInactive },
+  })
+  return res.data
+}
+
+export async function createImageModel(data) {
+  const res = await api.post('/image-models/create', data)
+  return res.data
+}
+
+export async function updateImageModel(id, data) {
+  const res = await api.put(`/image-models/${id}`, data)
+  return res.data
+}
+
+export async function deleteImageModel(id) {
+  const res = await api.delete(`/image-models/${id}`)
+  return res.data
+}
+
+export async function setDefaultImageModel(id) {
+  const res = await api.post(`/image-models/${id}/set-default`)
+  return res.data
+}
+
 // ============== 多平台适配 API (Platform Adapter) ==============
 
 /**

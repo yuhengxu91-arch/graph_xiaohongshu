@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 from typing import Any, Optional
+from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -45,6 +46,7 @@ class PreferencesUpdateRequest(BaseModel):
     default_style_tag: Optional[str] = None
     auto_save_to_gallery: Optional[bool] = None
     image_provider: Optional[str] = None
+    image_model_config_id: Optional[UUID] = None
     custom_api_key: Optional[str] = None
 
 
@@ -133,4 +135,10 @@ async def update_my_preferences(
     db: AsyncSession = Depends(get_async_session),
 ):
     data = request.model_dump(exclude_unset=True)
-    return await profile_service.update_preferences(db, user_id=current_user.id, data=data)
+    try:
+        return await profile_service.update_preferences(db, user_id=current_user.id, data=data)
+    except ValueError as e:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=str(e),
+        ) from e

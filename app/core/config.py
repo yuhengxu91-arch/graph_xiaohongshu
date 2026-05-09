@@ -53,6 +53,10 @@ class Settings(BaseSettings):
     sales_api_token: str = ""
     sales_api_timeout: float = 30.0
     sales_uploaded_by: str = "graph_xiaohongshu"
+
+    # ============== 管理员配置 ==============
+    # 逗号分隔用户名；另外系统会把最早创建的用户视为管理员，便于老项目无角色字段时使用。
+    admin_usernames: str = "admin"
     
     # ============== JWT 认证配置 ==============
     jwt_secret_key: str = "your-super-secret-key-change-in-production-2024"

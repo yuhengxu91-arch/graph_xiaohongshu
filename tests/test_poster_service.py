@@ -228,14 +228,15 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
         brand_service_mock = SimpleNamespace(get_brand_kit=AsyncMock(return_value=brand_kit))
 
         with patch.object(poster_api.profile_service, "get_user_image_provider", AsyncMock(return_value=None)):
-            with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response_payload)) as generate_mock:
-                with patch.object(poster_api.gallery_service, "create_generation_record", AsyncMock()):
-                    with patch("app.api.v1.poster.brand_service", brand_service_mock, create=True):
-                        await poster_api.generate_custom(
-                            poster_api.CustomGenerateRequest(prompt="新品海报"),
-                            current_user=SimpleNamespace(id=uuid4()),
-                            db=object(),
-                        )
+            with patch.object(poster_api, "_get_user_image_model_config", AsyncMock(return_value=None)):
+                with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response_payload)) as generate_mock:
+                    with patch.object(poster_api.gallery_service, "create_generation_record", AsyncMock()):
+                        with patch("app.api.v1.poster.brand_service", brand_service_mock, create=True):
+                            await poster_api.generate_custom(
+                                poster_api.CustomGenerateRequest(prompt="新品海报"),
+                                current_user=SimpleNamespace(id=uuid4()),
+                                db=object(),
+                            )
 
         brand_service_mock.get_brand_kit.assert_awaited_once()
         self.assertIs(generate_mock.call_args.kwargs["brand_kit"], brand_kit)

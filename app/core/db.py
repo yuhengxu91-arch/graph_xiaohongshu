@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import (
     create_async_engine,
     async_sessionmaker
 )
+from sqlalchemy import text
 from sqlalchemy.orm import declarative_base
 from app.core.config import settings
 
@@ -59,6 +60,11 @@ async def init_db() -> None:
 
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        if engine.dialect.name == "postgresql":
+            await conn.execute(text(
+                "ALTER TABLE user_preferences "
+                "ADD COLUMN IF NOT EXISTS image_model_config_id UUID"
+            ))
     print("[DB] Database initialized")
 
 

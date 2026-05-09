@@ -180,7 +180,11 @@ class BatchService:
                 )
 
             item["ai_prompt_used"] = enhanced_prompt
-            image_base64 = await poster_service._call_ai_image_api(enhanced_prompt)
+            image_base64 = await poster_service._call_ai_image_api(
+                enhanced_prompt,
+                provider_override=config.get("image_provider"),
+                image_model_config=config.get("image_model_config"),
+            )
             if not image_base64:
                 raise RuntimeError("AI 图片生成返回空结果")
 

@@ -139,6 +139,7 @@ class PosterService:
         aspect_ratio: str = "3:4",
         color_tone: Optional[str] = None,
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
         brand_kit: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
@@ -163,7 +164,11 @@ class PosterService:
 
         # 3. 调用 AI 生成图片
         print(f"[PosterService] 自定义生成: {prompt[:50]}...")
-        image_base64 = await self._call_ai_image_api(enhanced_prompt, provider_override=provider_override)
+        image_base64 = await self._call_ai_image_api(
+            enhanced_prompt,
+            provider_override=provider_override,
+            image_model_config=image_model_config,
+        )
 
         if not image_base64:
             return {
@@ -195,6 +200,7 @@ class PosterService:
         color_option: Optional[str] = None,
         aspect_ratio: Optional[str] = None,
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
         brand_kit: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
@@ -279,7 +285,11 @@ class PosterService:
 
         # 8. 调用 AI 生成
         print(f"[PosterService] 模板生成 [{template['name']}]: {params.get('title', '')}")
-        image_base64 = await self._call_ai_image_api(ai_prompt, provider_override=provider_override)
+        image_base64 = await self._call_ai_image_api(
+            ai_prompt,
+            provider_override=provider_override,
+            image_model_config=image_model_config,
+        )
 
         if not image_base64:
             return {
@@ -315,6 +325,7 @@ class PosterService:
         color_option: Optional[str] = None,
         aspect_ratio: Optional[str] = None,
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
         brand_kit: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """
@@ -381,7 +392,11 @@ class PosterService:
         # 6. 调用 AI 生成
         print(f"[PosterService] 个人模板生成 [{template_name}]: {params.get('title', '')}")
         print(f"[PosterService] 提示词: {ai_prompt[:200]}...")
-        image_base64 = await self._call_ai_image_api(ai_prompt, provider_override=provider_override)
+        image_base64 = await self._call_ai_image_api(
+            ai_prompt,
+            provider_override=provider_override,
+            image_model_config=image_model_config,
+        )
 
         if not image_base64:
             return {
@@ -413,6 +428,7 @@ class PosterService:
         edit_prompt: str,
         aspect_ratio: str = "3:4",
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         以图改图 — 上传原始图片 + 编辑指令，AI 修改图片内容
@@ -433,6 +449,7 @@ class PosterService:
         image_result_base64 = await self._call_ai_image_api(
             enhanced_prompt, input_image_base64=image_base64,
             provider_override=provider_override,
+            image_model_config=image_model_config,
         )
 
         if not image_result_base64:
@@ -463,6 +480,7 @@ class PosterService:
         strength: str = "medium",
         aspect_ratio: str = "3:4",
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         风格迁移 — 将原始图片转换为目标风格
@@ -487,6 +505,7 @@ class PosterService:
         image_result_base64 = await self._call_ai_image_api(
             enhanced_prompt, input_image_base64=image_base64,
             provider_override=provider_override,
+            image_model_config=image_model_config,
         )
 
         if not image_result_base64:
@@ -519,6 +538,7 @@ class PosterService:
         inpaint_prompt: str,
         aspect_ratio: str = "3:4",
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         局部重绘 — 根据遮罩区域和文字提示替换指定区域内容
@@ -540,6 +560,7 @@ class PosterService:
                 input_image_base64=image_base64,
                 mask_image_base64=mask_base64,
                 provider_override=provider_override,
+                image_model_config=image_model_config,
             )
 
             if not image_result:
@@ -564,6 +585,7 @@ class PosterService:
         image_base64: str,
         mask_base64: str,
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         智能擦除 — 擦除遮罩区域的内容并自动补全背景
@@ -583,6 +605,7 @@ class PosterService:
                 input_image_base64=image_base64,
                 mask_image_base64=mask_base64,
                 provider_override=provider_override,
+                image_model_config=image_model_config,
             )
 
             if not image_result:
@@ -611,6 +634,7 @@ class PosterService:
         strategy: str = "outpaint",
         outpaint_prompt: Optional[str] = None,
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         将图片从源比例适配到目标比例
@@ -641,6 +665,7 @@ class PosterService:
             image_result = await self._call_ai_image_api(
                 prompt, input_image_base64=image_base64,
                 provider_override=provider_override,
+                image_model_config=image_model_config,
             )
 
             if not image_result:
@@ -670,6 +695,7 @@ class PosterService:
         strategy: str = "outpaint",
         outpaint_prompt: Optional[str] = None,
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         全平台一键导出 — 并发适配为所有不同于源比例的目标尺寸
@@ -701,6 +727,7 @@ class PosterService:
                     strategy=strategy,
                     outpaint_prompt=outpaint_prompt,
                     provider_override=provider_override,
+                    image_model_config=image_model_config,
                 )
 
         # 并发执行所有适配任务
@@ -1006,11 +1033,32 @@ class PosterService:
         input_image_base64: Optional[str] = None,
         mask_image_base64: Optional[str] = None,
         provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """
         根据 IMAGE_PROVIDER 分派到对应的图片生成 API。
         返回 base64 编码的结果图片数据，失败返回 None。
         """
+        if image_model_config:
+            provider_type = image_model_config.get("provider_type")
+            if provider_type == "openai_image":
+                return await self._call_openai_image_api(prompt, image_model_config)
+            if provider_type == "gemini":
+                return await self._call_gemini_api(
+                    prompt,
+                    input_image_base64,
+                    mask_image_base64,
+                    dynamic_config=image_model_config,
+                )
+            if provider_type == "doubao":
+                return await self._call_doubao_image_api(
+                    prompt,
+                    input_image_base64,
+                    dynamic_config=image_model_config,
+                )
+            print(f"[PosterService] 未知动态图片模型类型: {provider_type}")
+            return None
+
         effective = self._get_effective_provider(provider_override)
         if effective == "doubao":
             return await self._call_doubao_image_api(prompt, input_image_base64)
@@ -1023,17 +1071,34 @@ class PosterService:
 
     async def _call_gpt_image_api(self, prompt: str) -> Optional[str]:
         """调用 GPT Image 2 生图 API（OpenAI 兼容，changhuai 渠道）"""
-        api_key = self.gpt_image_api_key
-        base_url = self.gpt_image_base_url
-        model = self.gpt_image_model
+        return await self._call_openai_image_api(
+            prompt,
+            {
+                "api_key": self.gpt_image_api_key,
+                "base_url": self.gpt_image_base_url,
+                "model_name": self.gpt_image_model,
+                "name": "GPT Image",
+            },
+        )
+
+    async def _call_openai_image_api(
+        self,
+        prompt: str,
+        config: Dict[str, Any],
+    ) -> Optional[str]:
+        """调用 OpenAI Images 兼容接口。"""
+        api_key = config.get("api_key", "")
+        base_url = (config.get("base_url") or "").rstrip("/")
+        model = config.get("model_name") or config.get("model") or "gpt-image-2"
+        tag = config.get("name") or "OpenAI-Image"
 
         if not api_key:
-            print("[PosterService] GPT_IMAGE_API_KEY 未配置")
+            print(f"[PosterService] {tag} API Key 未配置")
             return None
 
         url = f"{base_url}/v1/images/generations"
-        print(f"[PosterService] GPT-Image 请求 URL: {url}")
-        print(f"[PosterService] GPT-Image 使用模型: {model}")
+        print(f"[PosterService] {tag} 请求 URL: {url}")
+        print(f"[PosterService] {tag} 使用模型: {model}")
 
         payload = {
             "model": model,
@@ -1061,26 +1126,27 @@ class PosterService:
                         img_resp.raise_for_status()
                         return base64.b64encode(img_resp.content).decode("utf-8")
 
-                print(f"[PosterService] GPT-Image 生图无图片: {str(result)[:200]}")
-                return None
+            print(f"[PosterService] {tag} 生图无图片: {str(result)[:200]}")
+            return None
         except httpx.HTTPStatusError as e:
-            print(f"[PosterService] GPT-Image HTTP 错误: {e.response.status_code} {e.response.text[:200]}")
+            print(f"[PosterService] {tag} HTTP 错误: {e.response.status_code} {e.response.text[:200]}")
             return None
         except Exception as e:
-            print(f"[PosterService] GPT-Image 请求异常: {e}")
+            print(f"[PosterService] {tag} 请求异常: {e}")
             return None
 
     async def _call_doubao_image_api(
         self, prompt: str,
         input_image_base64: Optional[str] = None,
+        dynamic_config: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """
         调用火山方舟 doubao-seedream 图片生成 API。
         使用和 LLM 相同的 API Key，OpenAI 兼容格式。
         """
-        llm_api_key = os.getenv("LLM_API_KEY", "")
-        llm_base_url = os.getenv("LLM_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")
-        model = os.getenv("DOUBAO_IMAGE_MODEL", "doubao-seedream-3-0-t2i-250415")
+        llm_api_key = (dynamic_config or {}).get("api_key") or os.getenv("LLM_API_KEY", "")
+        llm_base_url = ((dynamic_config or {}).get("base_url") or os.getenv("LLM_BASE_URL", "https://ark.cn-beijing.volces.com/api/v3")).rstrip("/")
+        model = (dynamic_config or {}).get("model_name") or os.getenv("DOUBAO_IMAGE_MODEL", "doubao-seedream-3-0-t2i-250415")
 
         if not llm_api_key:
             print("[PosterService] LLM_API_KEY 未配置，无法使用 doubao 生图")
@@ -1175,9 +1241,15 @@ class PosterService:
         input_image_base64: Optional[str] = None,
         mask_image_base64: Optional[str] = None,
         use_changhuai: bool = False,
+        dynamic_config: Optional[Dict[str, Any]] = None,
     ) -> Optional[str]:
         """调用 Gemini 图片生成/编辑 API"""
-        if use_changhuai:
+        if dynamic_config:
+            api_key = dynamic_config.get("api_key", "")
+            base_url = (dynamic_config.get("base_url") or "").rstrip("/")
+            model = dynamic_config.get("model_name") or self.model
+            tag = dynamic_config.get("name") or "Gemini-Dynamic"
+        elif use_changhuai:
             api_key = self.api_key_ch
             base_url = self.base_url_ch
             model = self.model_ch
