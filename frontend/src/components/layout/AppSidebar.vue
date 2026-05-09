@@ -132,6 +132,7 @@ const mainNavItems = [
 const assetNavItems = [
   { name: '作品库', icon: '🖼️', path: 'gallery' },
   { name: '预设模板', icon: '📋', path: 'template_center' },
+  { name: '提示词库', icon: '📝', path: 'prompt_library' },
   { name: '品牌包设置', icon: '💎', path: 'brand' },
 ]
 

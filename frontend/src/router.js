@@ -16,6 +16,7 @@ const BrandPage = () => import('./BrandPage.vue')
 const TemplateCenterPage = () => import('./TemplateCenterPage.vue')
 const ProfilePage = () => import('./ProfilePage.vue')
 const PlatformPage = () => import('./PlatformPage.vue')
+const PromptLibraryPage = () => import('./PromptLibraryPage.vue')
 
 const routes = [
   {
@@ -65,6 +66,11 @@ const routes = [
         path: 'platform/:thread_id?',
         name: 'platform',
         component: PlatformPage
+      },
+      {
+        path: 'prompt-library',
+        name: 'prompt_library',
+        component: PromptLibraryPage
       }
     ]
   }

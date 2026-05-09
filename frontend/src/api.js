@@ -868,3 +868,69 @@ export async function createContentFromEvent(eventId) {
   const response = await api.post(`/calendar/events/${eventId}/create-content`)
   return response.data
 }
+
+// ============== 提示词库 API (Prompt Library) ==============
+
+/**
+ * 获取提示词列表
+ * @param {Object} params - { scope?: 'mine'|'public'|'all', category?, keyword? }
+ */
+export async function getPromptList(params = {}) {
+  const res = await api.get('/prompts/list', { params })
+  return res.data
+}
+
+/**
+ * 创建/收藏提示词
+ * @param {Object} data - { title, content, category?, tags?, source_mode? }
+ */
+export async function createPrompt(data) {
+  const res = await api.post('/prompts/create', data)
+  return res.data
+}
+
+/**
+ * 编辑提示词
+ * @param {string} id - 提示词 UUID
+ * @param {Object} data - { title?, content?, category?, tags?, source_mode? }
+ */
+export async function updatePrompt(id, data) {
+  const res = await api.put(`/prompts/${id}`, data)
+  return res.data
+}
+
+/**
+ * 删除提示词
+ * @param {string} id - 提示词 UUID
+ */
+export async function deletePrompt(id) {
+  const res = await api.delete(`/prompts/${id}`)
+  return res.data
+}
+
+/**
+ * 记录引用次数 +1
+ * @param {string} id - 提示词 UUID
+ */
+export async function usePrompt(id) {
+  const res = await api.post(`/prompts/${id}/use`)
+  return res.data
+}
+
+/**
+ * 发布为公共提示词
+ * @param {string} id - 提示词 UUID
+ */
+export async function publishPrompt(id) {
+  const res = await api.post(`/prompts/${id}/publish`)
+  return res.data
+}
+
+/**
+ * Fork 公共提示词到个人库
+ * @param {string} id - 提示词 UUID
+ */
+export async function forkPrompt(id) {
+  const res = await api.post(`/prompts/${id}/fork`)
+  return res.data
+}

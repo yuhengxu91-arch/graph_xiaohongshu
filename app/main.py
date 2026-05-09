@@ -34,6 +34,7 @@ from app.api.v1.profile import router as profile_router
 from app.api.v1.platform import router as platform_router
 from app.api.v1.calendar import router as calendar_router
 from app.api.v1.image_model import router as image_model_router
+from app.api.v1.prompt import router as prompt_router
 
 # 初始化日志系统（在导入其他模块之前）
 setup_logging(
@@ -171,6 +172,7 @@ app.include_router(profile_router, prefix="/api/v1")
 app.include_router(image_model_router, prefix="/api/v1")
 app.include_router(platform_router, prefix="/api/v1")
 app.include_router(calendar_router, prefix="/api/v1")
+app.include_router(prompt_router, prefix="/api/v1")
 
 # 挂载静态文件目录（用于访问生成的图片）
 static_dir = Path(__file__).parent.parent / "static"

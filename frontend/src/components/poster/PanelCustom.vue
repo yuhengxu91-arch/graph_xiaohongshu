@@ -10,9 +10,26 @@
       <div class="p-8 space-y-8">
         <!-- 提示词输入 -->
         <div class="space-y-4">
-          <label class="text-sm font-bold text-slate-700 flex items-center gap-2">
-            <span class="text-blue-500">✍️</span> 提示词描述
-          </label>
+          <div class="flex items-center justify-between">
+            <label class="text-sm font-bold text-slate-700 flex items-center gap-2">
+              <span class="text-blue-500">✍️</span> 提示词描述
+            </label>
+            <div class="flex items-center gap-2">
+              <button 
+                @click="showPromptPicker = true"
+                class="text-xs px-3 py-1.5 bg-blue-50 text-blue-600 hover:bg-blue-100 rounded-lg font-medium transition-colors flex items-center gap-1"
+              >
+                <span>📚</span> Prompt 库
+              </button>
+              <button 
+                v-if="form.prompt.trim()"
+                @click="openSavePromptModal"
+                class="text-xs px-3 py-1.5 bg-amber-50 text-amber-600 hover:bg-amber-100 rounded-lg font-medium transition-colors flex items-center gap-1"
+              >
+                <span>⭐</span> 收藏
+              </button>
+            </div>
+          </div>
           <textarea
             v-model="form.prompt"
             class="w-full bg-slate-50 border border-slate-200 rounded-3xl px-6 py-5 text-sm focus:ring-4 focus:ring-blue-500/10 focus:border-blue-600 outline-none transition-all placeholder:text-slate-400 resize-none overflow-y-auto"
@@ -121,12 +138,30 @@
         </div>
       </div>
     </div>
+
+    <!-- 快捷提示词选择抽屉 -->
+    <PromptPicker 
+      :show="showPromptPicker" 
+      defaultCategory="poster"
+      @close="showPromptPicker = false"
+      @select="handlePromptSelect"
+    />
+
+    <!-- 保存提示词弹窗 -->
+    <PromptEditor 
+      v-if="showSavePrompt"
+      :prompt="promptToSave"
+      @close="showSavePrompt = false"
+      @saved="handlePromptSaved"
+    />
   </div>
 </template>
 
 <script setup>
 import { ref, watch } from 'vue'
 import RatioSelector from './RatioSelector.vue'
+import PromptPicker from '../prompt/PromptPicker.vue'
+import PromptEditor from '../prompt/PromptEditor.vue'
 import { generatePromptOnly } from '../../api.js'
 
 const props = defineProps({
@@ -218,5 +253,33 @@ function copyPrompt() {
     copied.value = true
     setTimeout(() => { copied.value = false }, 2000)
   })
+}
+
+// ============ Prompt 库集成 ============
+const showPromptPicker = ref(false)
+const showSavePrompt = ref(false)
+const promptToSave = ref(null)
+
+const handlePromptSelect = (content) => {
+  // 如果当前已有内容，追加到末尾；否则直接替换
+  if (form.value.prompt.trim()) {
+    form.value.prompt = form.value.prompt.trim() + '\n\n' + content
+  } else {
+    form.value.prompt = content
+  }
+}
+
+const openSavePromptModal = () => {
+  promptToSave.value = {
+    content: form.value.prompt,
+    category: 'poster',
+    tags: form.value.selectedStyles.length > 0 ? [...form.value.selectedStyles] : []
+  }
+  showSavePrompt.value = true
+}
+
+const handlePromptSaved = () => {
+  showSavePrompt.value = false
+  // 可以添加一个全局的 Toast 提示成功
 }
 </script>
