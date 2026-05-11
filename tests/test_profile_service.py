@@ -13,12 +13,14 @@ class ProfileServiceTests(unittest.TestCase):
             default_style_tag=None,
             auto_save_to_gallery=True,
             image_provider="jimeng",
-            custom_api_key=None,
+            image_model_config_id=None,
+            custom_api_key="legacy-key",
         )
 
         data = service._serialize_prefs(pref)
 
         self.assertIsNone(data["image_provider"])
+        self.assertNotIn("custom_api_key", data)
 
 
 if __name__ == "__main__":

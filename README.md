@@ -265,7 +265,7 @@ LANGCHAIN_PROJECT=xiaohongshu-content-assistant
 #### 3. 启动后端
 
 ```bash
-uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+uvicorn app.main:app --reload --host 0.0.0.0 --port 8001
 ```
 
 #### 4. 启动前端

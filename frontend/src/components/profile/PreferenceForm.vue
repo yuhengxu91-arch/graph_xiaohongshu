@@ -72,20 +72,6 @@
         </div>
       </div>
 
-      <div class="divider"></div>
-
-      <div class="form-group">
-        <label>个人 Gemini API Key（旧版）</label>
-        <input
-          v-model="form.custom_api_key"
-          type="password"
-          class="input"
-          placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-          @change="debouncedSave"
-        />
-        <p class="hint">公共模型由管理员统一维护。这里仅保留旧版个人 Key 配置。</p>
-      </div>
-
       <template v-if="canManageModels">
         <div class="divider"></div>
 
@@ -95,7 +81,7 @@
               <h4>公共模型管理</h4>
               <p>管理员添加后，全站用户都可以在上方选择。</p>
             </div>
-            <button type="button" class="ghost-btn" @click="resetModelForm">新增模型</button>
+            <button type="button" class="ghost-btn" @click="openCreateModelDialog">新增模型</button>
           </div>
 
           <div v-if="imageModels.length" class="model-list">
@@ -111,7 +97,7 @@
                 <div class="model-key">Key: {{ model.api_key || '未配置' }}</div>
               </div>
               <div class="row-actions">
-                <button type="button" class="text-btn" @click="editModel(model)">编辑</button>
+                <button type="button" class="text-btn" @click="openEditModelDialog(model)">编辑</button>
                 <button
                   type="button"
                   class="text-btn"
@@ -126,80 +112,94 @@
           </div>
           <p v-else class="empty-hint">还没有公共模型，新增后用户即可选择。</p>
 
-          <form class="model-form" @submit.prevent="submitModel">
-            <div class="grid-two">
-              <label>
-                模型显示名称
-                <input v-model.trim="modelForm.name" class="input" placeholder="例如：GPT Image 2" />
-              </label>
-              <label>
-                接口类型
-                <select v-model="modelForm.provider_type" class="select full">
-                  <option
-                    v-for="type in providerTypes"
-                    :key="type.value"
-                    :value="type.value"
-                  >
-                    {{ type.label }}
-                  </option>
-                </select>
-              </label>
-            </div>
-
-            <label>
-              Base URL
-              <input v-model.trim="modelForm.base_url" class="input" placeholder="https://api.example.com" />
-            </label>
-
-            <div class="grid-two">
-              <label>
-                Model
-                <input v-model.trim="modelForm.model_name" class="input" placeholder="gpt-image-2" />
-              </label>
-              <label>
-                API Key
-                <input
-                  v-model.trim="modelForm.api_key"
-                  type="password"
-                  class="input"
-                  :placeholder="editingModelId ? '留空表示不修改' : 'sk-xxxxxxxxxxxxxxxx'"
-                />
-              </label>
-            </div>
-
-            <label>
-              备注
-              <textarea v-model.trim="modelForm.description" class="textarea" placeholder="可选：渠道、用途或注意事项"></textarea>
-            </label>
-
-            <div class="model-flags">
-              <label class="flag-inline">
-                排序
-                <input v-model.number="modelForm.sort_order" type="number" class="small-input" />
-              </label>
-              <label class="check-inline">
-                <input v-model="modelForm.is_active" type="checkbox" />
-                启用
-              </label>
-              <label class="check-inline">
-                <input v-model="modelForm.is_default" type="checkbox" />
-                设为系统默认
-              </label>
-            </div>
-
-            <div class="form-actions">
-              <button type="button" class="ghost-btn" @click="resetModelForm">清空</button>
-              <button type="submit" class="primary-btn" :disabled="submittingModel">
-                {{ editingModelId ? '保存修改' : '新增公共模型' }}
-              </button>
-            </div>
-          </form>
-
           <p v-if="modelMsg" :class="['save-msg', modelMsgError ? 'error' : '']">{{ modelMsg }}</p>
         </div>
       </template>
 
       <p v-if="saveMsg" :class="['save-msg', saveMsgError ? 'error' : '']">{{ saveMsg }}</p>
+    </div>
+
+    <div v-if="showModelDialog" class="modal-backdrop" role="presentation">
+      <div class="model-dialog" role="dialog" aria-modal="true" :aria-label="modelDialogTitle">
+        <div class="dialog-header">
+          <div>
+            <h4>{{ modelDialogTitle }}</h4>
+            <p>配置全站用户可选的图片生成模型。</p>
+          </div>
+          <button type="button" class="icon-btn" aria-label="关闭" @click="closeModelDialog">×</button>
+        </div>
+
+        <form class="model-form" @submit.prevent="submitModel">
+          <div class="grid-two">
+            <label>
+              模型显示名称
+              <input v-model.trim="modelForm.name" class="input" placeholder="例如：GPT Image 2" />
+            </label>
+            <label>
+              接口类型
+              <select v-model="modelForm.provider_type" class="select full">
+                <option
+                  v-for="type in providerTypes"
+                  :key="type.value"
+                  :value="type.value"
+                >
+                  {{ type.label }}
+                </option>
+              </select>
+            </label>
+          </div>
+
+          <label>
+            Base URL
+            <input v-model.trim="modelForm.base_url" class="input" placeholder="https://api.example.com" />
+          </label>
+
+          <div class="grid-two">
+            <label>
+              Model
+              <input v-model.trim="modelForm.model_name" class="input" placeholder="gpt-image-2" />
+            </label>
+            <label>
+              API Key
+              <input
+                v-model.trim="modelForm.api_key"
+                type="password"
+                class="input"
+                :placeholder="editingModelId ? '留空表示不修改' : 'sk-xxxxxxxxxxxxxxxx'"
+              />
+            </label>
+          </div>
+
+          <label>
+            备注
+            <textarea v-model.trim="modelForm.description" class="textarea" placeholder="可选：渠道、用途或注意事项"></textarea>
+          </label>
+
+          <div class="model-flags">
+            <label class="flag-inline">
+              排序
+              <input v-model.number="modelForm.sort_order" type="number" class="small-input" />
+            </label>
+            <label class="check-inline">
+              <input v-model="modelForm.is_active" type="checkbox" />
+              启用
+            </label>
+            <label class="check-inline">
+              <input v-model="modelForm.is_default" type="checkbox" />
+              设为系统默认
+            </label>
+          </div>
+
+          <p v-if="modelMsg" :class="['save-msg', 'dialog-msg', modelMsgError ? 'error' : '']">{{ modelMsg }}</p>
+
+          <div class="form-actions">
+            <button type="button" class="ghost-btn" @click="clearModelForm">清空</button>
+            <button type="submit" class="primary-btn" :disabled="submittingModel">
+              {{ editingModelId ? '保存修改' : '新增公共模型' }}
+            </button>
+          </div>
+        </form>
+      </div>
     </div>
   </div>
 </template>
@@ -237,7 +237,6 @@ const form = ref({
   auto_save_to_gallery: true,
   image_provider: null,
   image_model_config_id: null,
-  custom_api_key: ''
 })
 
 const selectedEngine = ref(null)
@@ -277,11 +276,13 @@ const blankModelForm = () => ({
 
 const modelForm = ref(blankModelForm())
 const editingModelId = ref(null)
+const showModelDialog = ref(false)
 const submittingModel = ref(false)
 const saveMsg = ref('')
 const saveMsgError = ref(false)
 const modelMsg = ref('')
 const modelMsgError = ref(false)
+const modelDialogTitle = computed(() => editingModelId.value ? '编辑公共模型' : '新增公共模型')
 let timer = null
 
 watch(() => props.prefs, (newVal) => {
@@ -370,6 +371,27 @@ function editModel(model) {
   modelMsg.value = ''
 }
 
+function openCreateModelDialog() {
+  resetModelForm()
+  showModelDialog.value = true
+}
+
+function openEditModelDialog(model) {
+  editModel(model)
+  showModelDialog.value = true
+}
+
+function closeModelDialog() {
+  showModelDialog.value = false
+  resetModelForm()
+}
+
+function clearModelForm() {
+  modelForm.value = blankModelForm()
+  modelMsg.value = ''
+  modelMsgError.value = false
+}
+
 function resetModelForm() {
   editingModelId.value = null
   modelForm.value = blankModelForm()
@@ -411,6 +433,7 @@ async function submitModel() {
       await createImageModel(payload)
     }
     await loadImageModels()
+    showModelDialog.value = false
     resetModelForm()
     modelMsg.value = '模型已保存'
     modelMsgError.value = false
@@ -780,6 +803,10 @@ label {
   padding-top: 4px;
 }
 
+.model-form label {
+  display: block;
+}
+
 .grid-two {
   display: grid;
   grid-template-columns: 1fr 1fr;
@@ -813,10 +840,61 @@ label {
   gap: 10px;
 }
 
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  background: rgba(15, 23, 42, 0.45);
+}
+
+.model-dialog {
+  width: min(720px, 100%);
+  max-height: min(760px, calc(100vh - 48px));
+  overflow-y: auto;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 0 24px 70px rgba(15, 23, 42, 0.22);
+}
+
+.dialog-header {
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  align-items: flex-start;
+  padding: 22px 24px 16px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.dialog-header h4 {
+  margin: 0;
+  color: #303133;
+  font-size: 18px;
+}
+
+.dialog-header p {
+  margin: 4px 0 0;
+  color: #909399;
+  font-size: 12px;
+}
+
+.model-dialog .model-form {
+  padding: 20px 24px 24px;
+}
+
+.dialog-msg {
+  text-align: left;
+  margin: 0;
+}
+
 .primary-btn,
 .ghost-btn,
 .text-btn,
-.danger-btn {
+.danger-btn,
+.icon-btn {
   border: 0;
   border-radius: 6px;
   padding: 8px 12px;
@@ -850,6 +928,22 @@ label {
   background: #fff1f0;
 }
 
+.icon-btn {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border-radius: 50%;
+  color: #64748b;
+  background: #f3f6fb;
+  font-size: 22px;
+  line-height: 1;
+}
+
+.icon-btn:hover {
+  color: #1f2937;
+  background: #e8eef8;
+}
+
 @media (max-width: 680px) {
   .form-group.row,
   .admin-title-row,
@@ -869,6 +963,22 @@ label {
   .row-actions {
     flex-direction: row;
     flex-wrap: wrap;
+  }
+
+  .modal-backdrop {
+    align-items: flex-end;
+    padding: 12px;
+  }
+
+  .model-dialog {
+    max-height: calc(100vh - 24px);
+    border-radius: 12px;
+  }
+
+  .dialog-header,
+  .model-dialog .model-form {
+    padding-left: 16px;
+    padding-right: 16px;
   }
 }
 </style>

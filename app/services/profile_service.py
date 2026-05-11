@@ -205,7 +205,6 @@ class ProfileService:
                 "auto_save_to_gallery": True,
                 "image_provider": None,
                 "image_model_config_id": None,
-                "custom_api_key": "",
             }
         return self._serialize_prefs(pref)
 
@@ -224,7 +223,7 @@ class ProfileService:
         updatable = [
             "default_aspect_ratio", "default_mode",
             "default_style_tag", "auto_save_to_gallery",
-            "image_provider", "image_model_config_id", "custom_api_key",
+            "image_provider", "image_model_config_id",
         ]
         for field in updatable:
             if field in data:
@@ -274,7 +273,6 @@ class ProfileService:
             "auto_save_to_gallery": pref.auto_save_to_gallery,
             "image_provider": pref.image_provider if pref.image_provider in self.VALID_IMAGE_PROVIDERS else None,
             "image_model_config_id": str(pref.image_model_config_id) if pref.image_model_config_id else None,
-            "custom_api_key": "***" if pref.custom_api_key else "",
         }
 
 

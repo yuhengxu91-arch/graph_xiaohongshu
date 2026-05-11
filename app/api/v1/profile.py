@@ -47,7 +47,6 @@ class PreferencesUpdateRequest(BaseModel):
     auto_save_to_gallery: Optional[bool] = None
     image_provider: Optional[str] = None
     image_model_config_id: Optional[UUID] = None
-    custom_api_key: Optional[str] = None
 
 
 # ========== 路由 ==========

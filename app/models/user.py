@@ -59,9 +59,6 @@ class UserPreference(Base):
         comment="全站公共图片模型配置 ID，优先级高于 image_provider"
     )
 
-    # API Key 管理（加密存储）
-    custom_api_key = Column(String(255), nullable=True, comment="用户自定义 Gemini API Key")
-
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 
