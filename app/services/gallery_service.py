@@ -128,6 +128,7 @@ class GalleryService:
         db: AsyncSession,
         *,
         user_id: UUID,
+        only_mine: bool = False,
         mode: Optional[list[str]] = None,
         is_favorite: Optional[bool] = None,
         is_template: Optional[bool] = None,
@@ -140,12 +141,16 @@ class GalleryService:
         page: int = 1,
         page_size: int = DEFAULT_PAGE_SIZE,
     ) -> dict[str, Any]:
-        """分页获取作品列表。"""
+        """分页获取作品列表。only_mine=True 时仅显示当前用户的作品。"""
         page = max(page, 1)
         page_size = max(1, min(page_size, MAX_PAGE_SIZE))
 
+        base_query = select(PosterGeneration)
+        if only_mine:
+            base_query = base_query.where(PosterGeneration.user_id == user_id)
+
         query = self._apply_filters(
-            select(PosterGeneration).where(PosterGeneration.user_id == user_id),
+            base_query,
             mode=mode,
             is_favorite=is_favorite,
             is_template=is_template,
@@ -291,6 +296,7 @@ class GalleryService:
         db: AsyncSession,
         *,
         user_id: UUID,
+        only_mine: bool = False,
         keyword: str,
         page: int = 1,
         page_size: int = DEFAULT_PAGE_SIZE,
@@ -299,6 +305,7 @@ class GalleryService:
         return await self.list_works(
             db,
             user_id=user_id,
+            only_mine=only_mine,
             keyword=keyword,
             page=page,
             page_size=page_size,
@@ -309,17 +316,18 @@ class GalleryService:
         db: AsyncSession,
         *,
         user_id: UUID,
+        only_mine: bool = False,
     ) -> dict[str, Any]:
-        """获取当前用户可用的筛选项。"""
-        rows = (
-            await db.execute(
-                select(
-                    PosterGeneration.tags,
-                    PosterGeneration.mode,
-                    PosterGeneration.source_mode,
-                ).where(PosterGeneration.user_id == user_id)
-            )
-        ).all()
+        """获取可用的筛选项。only_mine=True 时仅统计当前用户的作品。"""
+        query = select(
+            PosterGeneration.tags,
+            PosterGeneration.mode,
+            PosterGeneration.source_mode,
+        )
+        if only_mine:
+            query = query.where(PosterGeneration.user_id == user_id)
+
+        rows = (await db.execute(query)).all()
 
         tag_set: set[str] = set()
         mode_set: set[str] = set()

@@ -113,6 +113,7 @@ const hasMore = ref(false)
 
 const currentFilters = reactive({
   keyword: '',
+  only_mine: false,
   is_favorite: false,
   is_template: false,
   mode: '',
@@ -168,6 +169,7 @@ async function loadData() {
     }
 
     // 可选筛选参数
+    if (currentFilters.only_mine) params.only_mine = true
     if (currentFilters.mode) params.mode = currentFilters.mode
     if (currentFilters.is_favorite) params.is_favorite = true
     if (currentFilters.is_template) params.is_template = true

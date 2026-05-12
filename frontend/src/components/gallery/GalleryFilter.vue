@@ -23,6 +23,11 @@
       <!-- 快速筛选 Toggle -->
       <div class="flex items-center gap-4 bg-slate-100/50 p-1.5 rounded-xl border border-slate-200">
         <label class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-all hover:bg-white select-none"
+               :class="{ 'bg-white shadow-sm text-orange-600': localFilters.only_mine }">
+          <input type="checkbox" v-model="localFilters.only_mine" class="hidden" @change="applyFilters" />
+          <span class="text-xs font-bold">👤 只看自己</span>
+        </label>
+        <label class="flex items-center gap-2 px-3 py-1.5 rounded-lg cursor-pointer transition-all hover:bg-white select-none"
                :class="{ 'bg-white shadow-sm text-blue-600': localFilters.is_favorite }">
           <input type="checkbox" v-model="localFilters.is_favorite" class="hidden" @change="applyFilters" />
           <span class="text-xs font-bold">⭐ 只看收藏</span>
@@ -107,6 +112,7 @@ const emit = defineEmits(['update:filters', 'search'])
 
 const localFilters = reactive({
   keyword: props.filters.keyword || '',
+  only_mine: props.filters.only_mine || false,
   is_favorite: props.filters.is_favorite || false,
   is_template: props.filters.is_template || false,
   mode: props.filters.mode || '',
