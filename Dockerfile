@@ -26,7 +26,7 @@ WORKDIR /app
 
 # ---- 安装 Python 依赖（利用 Docker 缓存层） ----
 COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt -i https://mirrors.cloud.tencent.com/pypi/simple/ --trusted-host mirrors.cloud.tencent.com
 
 # ---- 复制业务代码 ----
 COPY app/ ./app/
