@@ -2,6 +2,12 @@
 
 import argparse
 import asyncio
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
 
 from app.core.db import async_session_factory
 from app.services.gallery_service import gallery_service
