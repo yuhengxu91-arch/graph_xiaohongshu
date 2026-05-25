@@ -10,11 +10,11 @@
 ```
                         用户浏览器
                             │
-                     http://119.91.198.219
+                     http://your_server_ip
                             │
          ┌──────────────────▼──────────────────────┐
          │       腾讯云轻量应用服务器                  │
-         │       119.91.198.219                     │
+         │       your_server_ip                     │
          │       4核 / 4GB / 40GB SSD               │
          │                                          │
          │   宿主机 Nginx (:80)        ← 总入口     │
@@ -65,7 +65,7 @@
 ### 1.2 登录服务器
 
 ```bash
-ssh ubuntu@119.91.198.219
+ssh ubuntu@your_server_ip
 ```
 
 ### 1.3 验证 Docker 环境
@@ -178,7 +178,7 @@ LLM_API_KEY=你的火山引擎API密钥
 IMAGE_API_KEY=你的Gemini密钥
 
 # ===== CORS =====
-CORS_ORIGINS=http://119.91.198.219,http://localhost:5173
+CORS_ORIGINS=http://your_server_ip,http://localhost:5173
 EOF
 ```
 
@@ -311,23 +311,23 @@ sudo nginx -t && sudo systemctl reload nginx
 
 ```bash
 # 后端健康检查
-curl http://119.91.198.219/health
+curl http://your_server_ip/health
 # 期望输出: {"status":"healthy","service":"AI内容运营助手"}
 
 # 前端页面
-curl -I http://119.91.198.219/
+curl -I http://your_server_ip/
 # 期望: HTTP/1.1 200 OK
 
 # SPA 路由
-curl -I http://119.91.198.219/workflow
+curl -I http://your_server_ip/workflow
 # 期望: HTTP/1.1 200 OK（非 404）
 
 # ark-h5 健康检查（确认不受影响）
-curl http://119.91.198.219/ark-h5/health
+curl http://your_server_ip/ark-h5/health
 # 期望: 正常返回
 ```
 
-浏览器打开 `http://119.91.198.219` 即可访问完整应用。
+浏览器打开 `http://your_server_ip` 即可访问完整应用。
 
 ---
 
@@ -364,7 +364,7 @@ curl http://119.91.198.219/ark-h5/health
 在域名服务商（如腾讯云 DNSPod）添加 A 记录：
 
 ```
-xhs.yourdomain.com → 119.91.198.219
+xhs.yourdomain.com → your_server_ip
 ```
 
 ### 5.2 方案一：宿主机 Nginx + Certbot（推荐）
