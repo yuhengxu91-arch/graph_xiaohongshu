@@ -4,6 +4,7 @@
 """
 import asyncio
 from typing import Optional, List, Dict, Any
+from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
 from fastapi.responses import StreamingResponse
@@ -52,6 +53,7 @@ class BatchGenerateResponse(BaseModel):
 
 class BatchItemStatus(BaseModel):
     """子任务状态"""
+    id: Optional[str] = None
     order_index: int
     status: str
     image_url: Optional[str] = None
@@ -75,7 +77,174 @@ class BatchStatusResponse(BaseModel):
     items: List[BatchItemStatus]
 
 
+class TemplateBatchReferenceImage(BaseModel):
+    """模板批量图片槽位引用图"""
+    name: str
+    image_base64: str
+
+
+class TemplateBatchItemInput(BaseModel):
+    """模板批量生成单条内容"""
+    params: Dict[str, Any] = Field(..., description="模板参数")
+    title: Optional[str] = Field(None, description="队列展示标题")
+    reference_images: Optional[List[TemplateBatchReferenceImage]] = Field(None, description="图片槽位引用图")
+
+
+class TemplateBatchGenerateRequest(BaseModel):
+    """模板批量生成请求"""
+    template_id: str = Field(..., description="模板 ID")
+    items: List[TemplateBatchItemInput] = Field(..., min_length=1, max_length=50)
+    style_tag: Optional[str] = None
+    color_option: Optional[str] = None
+    aspect_ratio: Optional[str] = None
+
+
+class BatchAppendResponse(BaseModel):
+    """追加批量任务条目响应"""
+    success: bool
+    task_id: Optional[str] = None
+    appended_count: int = 0
+    total_count: int = 0
+    should_start_worker: bool = False
+    error: Optional[str] = None
+
+
 # ======================== 接口 ========================
+
+async def _get_runtime_image_context(
+    db: AsyncSession,
+    current_user: Optional[User],
+) -> Dict[str, Any]:
+    brand_kit = None
+    image_provider = None
+    image_model_config = None
+    if current_user:
+        kit = await brand_service.get_brand_kit(db, user_id=current_user.id)
+        if kit:
+            brand_kit = brand_service.serialize(kit)
+        image_provider = await profile_service.get_user_image_provider(
+            db,
+            user_id=current_user.id,
+        )
+        image_model_config = await profile_service.get_user_image_model_config(
+            db,
+            user_id=current_user.id,
+        )
+
+    if not image_provider and not image_model_config:
+        default_model = await image_model_service.get_default_config(db)
+        if default_model:
+            image_model_config = image_model_service.runtime_config(default_model)
+
+    return {
+        "brand_kit": brand_kit,
+        "image_provider": image_provider,
+        "image_model_config": image_model_config,
+    }
+
+
+def _template_batch_items(items: List[TemplateBatchItemInput]) -> List[Dict[str, Any]]:
+    normalized = []
+    for item in items:
+        params = dict(item.params or {})
+        if item.title:
+            params["_batch_title"] = item.title
+        if item.reference_images:
+            params["reference_images"] = [
+                image.model_dump()
+                for image in item.reference_images
+            ]
+        normalized.append(params)
+    return normalized
+
+
+async def _template_shared_config(
+    req: TemplateBatchGenerateRequest,
+    db: AsyncSession,
+    current_user: Optional[User],
+) -> Dict[str, Any]:
+    from app.services.template_service import template_service
+
+    tpl = await template_service.get_template(db, template_id=UUID(req.template_id))
+    if not tpl:
+        raise HTTPException(status_code=404, detail=f"模板 {req.template_id} 不存在")
+
+    return {
+        "mode": "template",
+        "sequential": True,
+        "template_id": str(tpl.id),
+        "template_name": tpl.name,
+        "template_style_tag": tpl.style_tag,
+        "template_config": tpl.config or {},
+        "style_tag": req.style_tag,
+        "color_option": req.color_option,
+        "aspect_ratio": req.aspect_ratio or (tpl.config or {}).get("default_aspect_ratio", "3:4"),
+        "series_mode": False,
+        **(await _get_runtime_image_context(db, current_user)),
+    }
+
+
+@router.post(
+    "/template",
+    response_model=BatchGenerateResponse,
+    summary="提交模板批量生成任务",
+)
+async def template_batch_generate(
+    req: TemplateBatchGenerateRequest,
+    background_tasks: BackgroundTasks,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """
+    提交模板批量生成任务。该模式强制后端串行执行，避免多张图同时打模型通道。
+    """
+    try:
+        result = await batch_service.create_batch_task(
+            _template_batch_items(req.items),
+            await _template_shared_config(req, db, current_user),
+            user_id=current_user.id if current_user else None,
+        )
+        background_tasks.add_task(batch_service.run_batch_task, result["task_id"])
+        return BatchGenerateResponse(
+            success=True,
+            task_id=result["task_id"],
+            total_count=result["total_count"],
+            mode="batch",
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        return BatchGenerateResponse(
+            success=False,
+            error=f"创建模板批量任务失败: {str(e)}",
+        )
+
+
+@router.post(
+    "/{task_id}/template-items",
+    response_model=BatchAppendResponse,
+    summary="向模板批量任务追加条目",
+)
+async def append_template_batch_items(
+    task_id: str,
+    req: TemplateBatchGenerateRequest,
+    background_tasks: BackgroundTasks,
+):
+    """
+    向已有模板批量任务追加条目；如果任务已结束，会重新启动同一个任务继续处理新条目。
+    """
+    result = await batch_service.append_batch_items(
+        task_id,
+        _template_batch_items(req.items),
+    )
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
+
+    if result.get("should_start_worker"):
+        background_tasks.add_task(batch_service.run_batch_task, task_id)
+
+    return BatchAppendResponse(**result)
+
 
 @router.post(
     "/generate",
@@ -96,27 +265,6 @@ async def batch_generate(
     - 最大并发数: 3
     """
     try:
-        brand_kit = None
-        image_provider = None
-        image_model_config = None
-        if current_user:
-            kit = await brand_service.get_brand_kit(db, user_id=current_user.id)
-            if kit:
-                brand_kit = brand_service.serialize(kit)
-            image_provider = await profile_service.get_user_image_provider(
-                db,
-                user_id=current_user.id,
-            )
-            image_model_config = await profile_service.get_user_image_model_config(
-                db,
-                user_id=current_user.id,
-            )
-
-        if not image_provider and not image_model_config:
-            default_model = await image_model_service.get_default_config(db)
-            if default_model:
-                image_model_config = image_model_service.runtime_config(default_model)
-
         # 构建共享配置
         shared_config = {
             "mode": req.mode,
@@ -125,9 +273,7 @@ async def batch_generate(
             "style_tags": req.style_tags,
             "template_index": req.template_index,
             "series_mode": req.series_mode,
-            "brand_kit": brand_kit,
-            "image_provider": image_provider,
-            "image_model_config": image_model_config,
+            **(await _get_runtime_image_context(db, current_user)),
         }
 
         # 转换 items

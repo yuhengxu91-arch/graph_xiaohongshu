@@ -432,6 +432,25 @@ export async function generateBatchPoster(data) {
 }
 
 /**
+ * 创建模板批量生成任务（后端串行队列）
+ * @param {Object} data - { template_id, items, style_tag?, color_option?, aspect_ratio? }
+ */
+export async function createTemplateBatchTask(data) {
+  const res = await api.post('/poster/batch/template', data)
+  return res.data
+}
+
+/**
+ * 向模板批量生成任务追加条目
+ * @param {string} taskId - 任务 ID
+ * @param {Object} data - { template_id, items, style_tag?, color_option?, aspect_ratio? }
+ */
+export async function appendTemplateBatchItems(taskId, data) {
+  const res = await api.post(`/poster/batch/${taskId}/template-items`, data)
+  return res.data
+}
+
+/**
  * 查询批量任务进度
  * @param {string} taskId - 任务 ID
  */

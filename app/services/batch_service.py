@@ -40,21 +40,7 @@ class BatchService:
 
         task_items = []
         for idx, item in enumerate(items):
-            item_uuid = uuid.uuid4()
-            task_items.append(
-                {
-                    "id": str(item_uuid),
-                    "order_index": idx,
-                    "item_params": item,
-                    "status": "pending",
-                    "image_url": None,
-                    "ai_prompt_used": None,
-                    "error_message": None,
-                    "retry_count": 0,
-                    "started_at": None,
-                    "completed_at": None,
-                }
-            )
+            task_items.append(self._build_task_item(item, idx))
 
         task = {
             "id": task_id,
@@ -70,6 +56,7 @@ class BatchService:
             "started_at": None,
             "completed_at": None,
             "series_style_anchor": None,
+            "worker_running": False,
         }
 
         _tasks[task_id] = task
@@ -82,6 +69,46 @@ class BatchService:
             "mode": "batch",
         }
 
+    async def append_batch_items(
+        self,
+        task_id: str,
+        items: List[Dict[str, Any]],
+    ) -> Optional[Dict[str, Any]]:
+        """
+        向已有任务追加子任务。若原任务已经结束，调用方需要重新启动后台 worker。
+        """
+        task = _tasks.get(task_id)
+        if not task:
+            return None
+
+        should_start_worker = (
+            not task.get("worker_running", False)
+            and task["status"] not in {"pending", "running"}
+        )
+        start_index = len(task["items"])
+        new_items = [
+            self._build_task_item(item, start_index + idx)
+            for idx, item in enumerate(items)
+        ]
+        task["items"].extend(new_items)
+        task["total_count"] = len(task["items"])
+
+        if should_start_worker:
+            task["status"] = "pending"
+            task["completed_at"] = None
+
+        self._update_task_counts(task)
+        await self._persist_new_items(task, new_items)
+        await self._sync_task_state(task, sync_all_items=False)
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "appended_count": len(new_items),
+            "total_count": task["total_count"],
+            "should_start_worker": should_start_worker,
+        }
+
     async def run_batch_task(self, task_id: str) -> None:
         """
         异步执行批量生成任务。
@@ -89,46 +116,79 @@ class BatchService:
         task = _tasks.get(task_id)
         if not task:
             return
+        if task.get("worker_running"):
+            return
 
+        task["worker_running"] = True
         task["status"] = "running"
         task["started_at"] = datetime.utcnow().isoformat()
         await self._sync_task_state(task, sync_all_items=False)
 
-        config = task["shared_config"]
-        series_mode = config.get("series_mode", False)
-        items = task["items"]
+        try:
+            while True:
+                config = task["shared_config"]
+                series_mode = config.get("series_mode", False)
+                items = task["items"]
 
-        if series_mode and items:
-            first_item = items[0]
-            await self._generate_single_item(task, first_item, config, is_anchor=True)
-            if first_item["status"] != "success":
-                series_mode = False
-            remaining_items = items[1:]
-        else:
-            remaining_items = items
+                if config.get("sequential"):
+                    while True:
+                        pending_item = next(
+                            (item for item in task["items"] if item["status"] == "pending"),
+                            None,
+                        )
+                        if not pending_item:
+                            await asyncio.sleep(0.2)
+                            pending_item = next(
+                                (item for item in task["items"] if item["status"] == "pending"),
+                                None,
+                            )
+                            if not pending_item:
+                                break
+                        await self._generate_single_item(task, pending_item, config, is_anchor=False)
+                else:
+                    if series_mode and items:
+                        first_item = items[0]
+                        await self._generate_single_item(task, first_item, config, is_anchor=True)
+                        if first_item["status"] != "success":
+                            series_mode = False
+                        remaining_items = items[1:]
+                    else:
+                        remaining_items = items
 
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+                    semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 
-        async def _limited_generate(item: Dict[str, Any]) -> None:
-            async with semaphore:
-                await self._generate_single_item(task, item, config, is_anchor=False)
+                    async def _limited_generate(item: Dict[str, Any]) -> None:
+                        async with semaphore:
+                            await self._generate_single_item(task, item, config, is_anchor=False)
 
-        if remaining_items:
-            await asyncio.gather(
-                *[_limited_generate(item) for item in remaining_items],
-                return_exceptions=True,
-            )
+                    if remaining_items:
+                        await asyncio.gather(
+                            *[_limited_generate(item) for item in remaining_items],
+                            return_exceptions=True,
+                        )
 
-        self._update_task_counts(task)
-        if task["failed_count"] == 0:
-            task["status"] = "completed"
-        elif task["success_count"] > 0:
-            task["status"] = "partial_failed"
-        else:
-            task["status"] = "failed"
+                self._update_task_counts(task)
+                if task["failed_count"] == 0:
+                    task["status"] = "completed"
+                elif task["success_count"] > 0:
+                    task["status"] = "partial_failed"
+                else:
+                    task["status"] = "failed"
 
-        task["completed_at"] = datetime.utcnow().isoformat()
-        await self._sync_task_state(task, sync_all_items=False)
+                task["completed_at"] = datetime.utcnow().isoformat()
+                await self._sync_task_state(task, sync_all_items=False)
+
+                if config.get("sequential") and any(
+                    item["status"] == "pending"
+                    for item in task["items"]
+                ):
+                    task["status"] = "running"
+                    task["completed_at"] = None
+                    await self._sync_task_state(task, sync_all_items=False)
+                    continue
+                break
+        finally:
+            task["worker_running"] = False
 
     async def _generate_single_item(
         self,
@@ -148,6 +208,10 @@ class BatchService:
 
         try:
             params = item["item_params"]
+            if config.get("mode") == "template":
+                await self._generate_template_item(task, item, config)
+                return
+
             prompt = params.get("prompt", "")
             title = params.get("title", "")
             subtitle = params.get("subtitle", "")
@@ -211,6 +275,40 @@ class BatchService:
             self._update_task_counts(task)
             await self._sync_task_state(task, item=item)
 
+    async def _generate_template_item(
+        self,
+        task: Dict[str, Any],
+        item: Dict[str, Any],
+        config: Dict[str, Any],
+    ) -> None:
+        raw_params = item["item_params"]
+        reference_images = raw_params.get("reference_images") or []
+        params = {
+            key: value
+            for key, value in raw_params.items()
+            if key not in {"reference_images"} and not key.startswith("_")
+        }
+        result = await poster_service.generate_from_db_template(
+            template_config=config.get("template_config", {}),
+            template_name=config.get("template_name") or "模板批量生成",
+            template_style_tag=config.get("template_style_tag"),
+            params=params,
+            reference_images=reference_images,
+            style_tag=config.get("style_tag"),
+            color_option=config.get("color_option"),
+            aspect_ratio=config.get("aspect_ratio"),
+            provider_override=config.get("image_provider"),
+            image_model_config=config.get("image_model_config"),
+            brand_kit=config.get("brand_kit"),
+        )
+        if not result.get("success"):
+            raise RuntimeError(result.get("error") or "AI 图片生成失败")
+
+        item["image_url"] = result.get("image_url")
+        item["ai_prompt_used"] = result.get("prompt_used")
+        item["status"] = "success"
+        await self._save_batch_output(task, item, config)
+
     def get_batch_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """
         查询批量任务的完整状态。
@@ -233,11 +331,12 @@ class BatchService:
             "completed_at": task["completed_at"],
             "items": [
                 {
+                    "id": it["id"],
                     "order_index": it["order_index"],
                     "status": it["status"],
                     "image_url": it["image_url"],
                     "error_message": it["error_message"],
-                    "title": it["item_params"].get("title", ""),
+                    "title": self._item_title(it["item_params"]),
                     "subtitle": it["item_params"].get("subtitle", ""),
                 }
                 for it in task["items"]
@@ -356,6 +455,35 @@ class BatchService:
 
             await session.commit()
 
+    async def _persist_new_items(
+        self,
+        task: Dict[str, Any],
+        new_items: List[Dict[str, Any]],
+    ) -> None:
+        async with async_session_factory() as session:
+            db_task = await session.get(BatchTask, UUID(task["id"]))
+            if db_task:
+                db_task.status = task["status"]
+                db_task.total_count = task["total_count"]
+                db_task.success_count = task["success_count"]
+                db_task.failed_count = task["failed_count"]
+                db_task.running_count = task["running_count"]
+                db_task.completed_at = self._parse_dt(task["completed_at"])
+
+            for item in new_items:
+                session.add(
+                    BatchTaskItem(
+                        id=UUID(item["id"]),
+                        batch_task_id=UUID(task["id"]),
+                        order_index=item["order_index"],
+                        item_params=item["item_params"],
+                        status=item["status"],
+                        retry_count=item["retry_count"],
+                    )
+                )
+
+            await session.commit()
+
     async def _sync_task_state(
         self,
         task: Dict[str, Any],
@@ -405,7 +533,7 @@ class BatchService:
         )
         payload = {
             "prompt": item["item_params"].get("prompt"),
-            "title": item["item_params"].get("title"),
+            "title": self._item_title(item["item_params"]),
             "params": item["item_params"],
             "style_tags": config.get("style_tags"),
             "aspect_ratio": config.get("aspect_ratio", "3:4"),
@@ -427,10 +555,36 @@ class BatchService:
                 source_mode="batch",
                 generation_result=result,
                 request_payload=payload,
-                title=item["item_params"].get("title"),
+                title=self._item_title(item["item_params"]),
                 batch_task_id=UUID(task["id"]),
             )
             await session.commit()
+
+    @staticmethod
+    def _build_task_item(item: Dict[str, Any], order_index: int) -> Dict[str, Any]:
+        return {
+            "id": str(uuid.uuid4()),
+            "order_index": order_index,
+            "item_params": item,
+            "status": "pending",
+            "image_url": None,
+            "ai_prompt_used": None,
+            "error_message": None,
+            "retry_count": 0,
+            "started_at": None,
+            "completed_at": None,
+        }
+
+    @staticmethod
+    def _item_title(params: Dict[str, Any]) -> str:
+        if params.get("_batch_title"):
+            return str(params["_batch_title"])
+        if params.get("title"):
+            return str(params["title"])
+        for value in params.values():
+            if isinstance(value, str) and value.strip():
+                return value.strip()
+        return ""
 
     @staticmethod
     def _update_task_counts(task: Dict[str, Any]) -> None:

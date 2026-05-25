@@ -74,6 +74,8 @@
       </div>
 
       <div class="p-8 space-y-10">
+        <div class="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-8 items-start">
+          <div class="space-y-10 min-w-0">
         <!-- 动态参数列表 -->
         <div class="grid grid-cols-1 md:grid-cols-2 gap-8">
           <div
@@ -138,10 +140,10 @@
         </div>
 
         <!-- 生成按钮 -->
-        <div class="pt-6">
+        <div class="pt-6 grid grid-cols-1 md:grid-cols-2 gap-4">
           <button
             class="w-full bg-blue-600 hover:bg-blue-700 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-black py-5 rounded-[2rem] shadow-2xl shadow-blue-600/30 transition-all flex items-center justify-center gap-3 group relative overflow-hidden"
-            :disabled="!isValid || generating"
+            :disabled="!isValid || generating || batchProcessing"
             @click="handleGenerate"
           >
             <span v-if="generating" class="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
@@ -149,6 +151,97 @@
             <span class="text-lg tracking-wide">{{ generating ? '正在施展魔法...' : '生成渲染海报' }}</span>
             <div class="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:animate-shimmer" v-if="!generating"></div>
           </button>
+          <button
+            class="w-full bg-slate-900 hover:bg-slate-800 disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed text-white font-black py-5 rounded-[2rem] shadow-2xl shadow-slate-900/20 transition-all flex items-center justify-center gap-3 group relative overflow-hidden"
+            :disabled="!isValid || generating || batchSubmitting"
+            @click="handleBatchGenerate"
+          >
+            <span v-if="batchSubmitting" class="w-6 h-6 border-2 border-white/30 border-t-white rounded-full animate-spin"></span>
+            <span v-else class="text-xl transition-transform group-hover:scale-125 duration-300">➕</span>
+            <span class="text-lg tracking-wide">批量生产</span>
+          </button>
+        </div>
+          </div>
+
+          <aside
+            v-if="hasBatchActivity"
+            class="xl:sticky xl:top-6 bg-slate-50 border border-slate-100 rounded-[2rem] p-5 space-y-5 shadow-inner"
+          >
+            <div class="flex items-center justify-between">
+              <div>
+                <h3 class="text-sm font-black text-slate-800">批量生产队列</h3>
+                <p class="text-[10px] text-slate-400 uppercase tracking-widest mt-0.5">Template Batch Queue</p>
+              </div>
+              <span class="px-3 py-1 bg-white border border-slate-100 rounded-full text-xs font-black text-blue-600">
+                {{ batchStatus?.success_count || 0 }}/{{ batchStatus?.total_count || batchResults.length + batchQueue.length }}
+              </span>
+            </div>
+
+            <div v-if="batchQueue.length > 0" class="space-y-3">
+              <div
+                v-for="item in batchQueue"
+                :key="item.id"
+                class="bg-white border border-slate-100 rounded-2xl p-4 shadow-sm flex items-center gap-3"
+              >
+                <div class="w-9 h-9 rounded-xl flex items-center justify-center shrink-0"
+                  :class="item.status === 'running' ? 'bg-blue-50 text-blue-600' : 'bg-slate-100 text-slate-400'"
+                >
+                  <span v-if="item.status === 'running'" class="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+                  <span v-else class="text-xs font-black">{{ item.order_index + 1 }}</span>
+                </div>
+                <div class="min-w-0 flex-1">
+                  <div class="text-xs font-black text-slate-700 truncate">{{ item.title }}</div>
+                  <div class="text-[10px] text-slate-400 mt-0.5">{{ item.status === 'running' ? '生成中' : '等待生成' }}</div>
+                </div>
+              </div>
+            </div>
+            <div v-else class="py-8 text-center text-xs text-slate-400 bg-white/60 rounded-2xl border border-dashed border-slate-200">
+              {{ batchProcessing ? '正在收尾...' : '队列已清空' }}
+            </div>
+          </aside>
+        </div>
+
+        <div
+          v-if="batchResults.length > 0 && isBatchComplete"
+          class="border-t border-slate-100 pt-10 space-y-6"
+        >
+          <div class="flex items-center justify-between">
+            <div>
+              <h3 class="text-lg font-black text-slate-800">批量生成结果</h3>
+              <p class="text-xs text-slate-400 mt-1">
+                成功 {{ batchStatus?.success_count || 0 }} 张，失败 {{ batchStatus?.failed_count || 0 }} 张
+              </p>
+            </div>
+            <button
+              class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-black rounded-xl transition-colors"
+              @click="clearBatchResults"
+            >
+              清空结果
+            </button>
+          </div>
+
+          <div class="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-4 gap-5">
+            <div
+              v-for="item in batchResults"
+              :key="item.id"
+              class="bg-white border border-slate-100 rounded-3xl overflow-hidden shadow-sm hover:shadow-xl transition-all group"
+            >
+              <div v-if="item.status === 'success' && item.image_url" class="aspect-[3/4] bg-slate-900 relative overflow-hidden">
+                <img :src="getImageUrl(item.image_url)" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="批量生成海报" />
+                <div class="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
+                  <a :href="getImageUrl(item.image_url)" download class="px-3 py-2 bg-white rounded-xl text-xs font-black text-slate-700 shadow-lg">下载</a>
+                </div>
+              </div>
+              <div v-else class="aspect-[3/4] bg-red-50 flex flex-col items-center justify-center gap-3 p-5 text-center">
+                <span class="text-3xl">⚠️</span>
+                <p class="text-xs font-bold text-red-500 line-clamp-3">{{ item.error_message || '生成失败' }}</p>
+              </div>
+              <div class="p-4">
+                <div class="text-sm font-black text-slate-800 truncate">{{ item.title }}</div>
+                <div class="text-[10px] text-slate-400 mt-1">#{{ item.order_index + 1 }}</div>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -156,9 +249,16 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, watch } from 'vue'
+import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import RatioSelector from './RatioSelector.vue'
 import TemplatePreview from '../template/TemplatePreview.vue'
+import {
+  appendTemplateBatchItems,
+  createTemplateBatchTask,
+  getBatchStatus,
+} from '../../api.js'
+
+const API_BASE = import.meta.env.VITE_API_BASE_URL || ''
 
 const props = defineProps({
   templates: { type: Array, default: () => [] },
@@ -184,6 +284,11 @@ const form = ref({
   aspectRatio: null,
 })
 const consumedPrefillKey = ref(null)
+const batchTaskId = ref(null)
+const batchStatus = ref(null)
+const batchSubmitting = ref(false)
+let batchPollTimer = null
+const terminalBatchStatuses = ['completed', 'partial_failed', 'failed']
 
 onMounted(() => {
   const saved = sessionStorage.getItem('use_template')
@@ -211,6 +316,10 @@ onMounted(() => {
   }
 })
 
+onUnmounted(() => {
+  clearBatchPolling()
+})
+
 watch(
   [() => props.prefill, () => props.templates],
   () => {
@@ -228,6 +337,29 @@ const isValid = computed(() => {
     }
   }
   return true
+})
+
+const batchQueue = computed(() => {
+  const items = batchStatus.value?.items || []
+  return items.filter(item => ['pending', 'running'].includes(item.status))
+})
+
+const batchResults = computed(() => {
+  const items = batchStatus.value?.items || []
+  return items.filter(item => ['success', 'failed'].includes(item.status))
+})
+
+const batchProcessing = computed(() => {
+  const status = batchStatus.value?.status
+  return batchSubmitting.value || status === 'pending' || status === 'running'
+})
+
+const hasBatchActivity = computed(() => {
+  return !!batchTaskId.value || batchSubmitting.value || batchQueue.value.length > 0 || batchResults.value.length > 0
+})
+
+const isBatchComplete = computed(() => {
+  return terminalBatchStatuses.includes(batchStatus.value?.status)
 })
 
 function selectTemplate(tpl, overrides = {}) {
@@ -281,5 +413,121 @@ function handleGenerate() {
     template: selectedTemplate.value,
     ...form.value
   })
+}
+
+async function handleBatchGenerate() {
+  if (!selectedTemplate.value || !isValid.value || props.generating) return
+
+  const params = JSON.parse(JSON.stringify(form.value.params))
+  const item = {
+    title: getBatchTitle(params),
+    params,
+  }
+  const payload = buildTemplateBatchPayload([item])
+
+  batchSubmitting.value = true
+  try {
+    let result
+    if (batchTaskId.value) {
+      result = await appendTemplateBatchItems(batchTaskId.value, payload)
+    } else {
+      result = await createTemplateBatchTask(payload)
+      if (result?.task_id) {
+        batchTaskId.value = result.task_id
+      }
+    }
+
+    if (!result?.success) {
+      throw new Error(result?.error || '加入批量队列失败')
+    }
+    if (!batchTaskId.value && result.task_id) {
+      batchTaskId.value = result.task_id
+    }
+
+    clearTextParams()
+    await refreshTemplateBatchStatus()
+    startBatchPolling()
+  } catch (e) {
+    console.error('模板批量任务提交失败:', e)
+    window.alert?.(e.response?.data?.detail || e.message || '加入批量队列失败')
+  } finally {
+    batchSubmitting.value = false
+  }
+}
+
+function getBatchTitle(params) {
+  const slots = selectedTemplate.value?.text_slots || []
+  for (const slot of slots) {
+    const value = params[slot.name]
+    if (value && String(value).trim()) return String(value).trim()
+  }
+  return selectedTemplate.value?.name || '模板任务'
+}
+
+function clearTextParams() {
+  const cleared = {}
+  for (const key of Object.keys(form.value.params || {})) {
+    cleared[key] = ''
+  }
+  form.value.params = cleared
+}
+
+function buildTemplateBatchPayload(items) {
+  return {
+    template_id: selectedTemplate.value.id,
+    items,
+    style_tag: selectedTemplate.value.style_tag || undefined,
+    color_option: form.value.colorOption || undefined,
+    aspect_ratio: form.value.aspectRatio || selectedTemplate.value.default_aspect_ratio || undefined,
+  }
+}
+
+async function refreshTemplateBatchStatus() {
+  if (!batchTaskId.value) return null
+  try {
+    const status = await getBatchStatus(batchTaskId.value)
+    batchStatus.value = status
+    return status
+  } catch (e) {
+    console.error('刷新模板批量任务状态失败:', e)
+    throw e
+  }
+}
+
+function startBatchPolling() {
+  clearBatchPolling()
+  const poll = async () => {
+    try {
+      const status = await refreshTemplateBatchStatus()
+      if (!status || terminalBatchStatuses.includes(status.status)) {
+        batchPollTimer = null
+        return
+      }
+    } catch (e) {
+      batchPollTimer = null
+      return
+    }
+    batchPollTimer = window.setTimeout(poll, 2000)
+  }
+  batchPollTimer = window.setTimeout(poll, 1000)
+}
+
+function clearBatchPolling() {
+  if (!batchPollTimer) return
+  window.clearTimeout(batchPollTimer)
+  batchPollTimer = null
+}
+
+function clearBatchResults() {
+  clearBatchPolling()
+  batchTaskId.value = null
+  batchStatus.value = null
+  batchSubmitting.value = false
+}
+
+function getImageUrl(url) {
+  if (!url) return ''
+  if (url.startsWith('http')) return url
+  return `${API_BASE}${url}`
 }
 </script>

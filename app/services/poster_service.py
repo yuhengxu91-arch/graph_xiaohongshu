@@ -321,6 +321,7 @@ class PosterService:
         template_name: str,
         template_style_tag: Optional[str],
         params: Dict[str, str],
+        reference_images: Optional[List[Dict[str, Any]]] = None,
         style_tag: Optional[str] = None,
         color_option: Optional[str] = None,
         aspect_ratio: Optional[str] = None,
@@ -389,11 +390,19 @@ class PosterService:
         if brand_kit:
             ai_prompt = self._inject_brand(ai_prompt, brand_kit)
 
+        input_image_base64 = None
+        if reference_images:
+            first_reference = reference_images[0] or {}
+            input_image_base64 = first_reference.get("image_base64")
+            if input_image_base64:
+                ai_prompt += "\n\n请参考上传图片的主体信息、构图关系或二维码内容进行创作。"
+
         # 6. 调用 AI 生成
         print(f"[PosterService] 个人模板生成 [{template_name}]: {params.get('title', '')}")
         print(f"[PosterService] 提示词: {ai_prompt[:200]}...")
         image_base64 = await self._call_ai_image_api(
             ai_prompt,
+            input_image_base64=input_image_base64,
             provider_override=provider_override,
             image_model_config=image_model_config,
         )
