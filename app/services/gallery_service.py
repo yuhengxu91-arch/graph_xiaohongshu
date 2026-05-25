@@ -425,6 +425,48 @@ class GalleryService:
         except Exception:
             return image_url
 
+    async def backfill_missing_thumbnails(
+        self,
+        db: AsyncSession,
+        *,
+        limit: int = 200,
+    ) -> dict[str, int]:
+        """为历史作品分批补齐缩略图地址，供离线脚本执行。"""
+        limit = max(1, min(limit, 1000))
+        query = (
+            select(PosterGeneration)
+            .where(
+                PosterGeneration.image_url.is_not(None),
+                or_(
+                    PosterGeneration.thumbnail_url.is_(None),
+                    PosterGeneration.thumbnail_url == "",
+                ),
+            )
+            .order_by(PosterGeneration.created_at.asc())
+            .limit(limit)
+        )
+        works = (await db.execute(query)).scalars().all()
+        updated_count = 0
+        fallback_count = 0
+
+        for work in works:
+            if work.thumbnail_url:
+                continue
+            thumbnail_url = self.generate_thumbnail(work.image_url)
+            if not thumbnail_url:
+                continue
+            work.thumbnail_url = thumbnail_url
+            updated_count += 1
+            if thumbnail_url == work.image_url:
+                fallback_count += 1
+
+        await db.flush()
+        return {
+            "scanned_count": len(works),
+            "updated_count": updated_count,
+            "fallback_count": fallback_count,
+        }
+
     def get_file_size(self, image_url: Optional[str]) -> Optional[int]:
         """获取本地文件大小。"""
         file_path = self.resolve_static_path(image_url)

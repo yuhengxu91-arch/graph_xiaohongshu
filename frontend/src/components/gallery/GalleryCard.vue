@@ -6,9 +6,10 @@
     <!-- 图片容器 -->
     <div class="relative aspect-[3/4] overflow-hidden bg-slate-100">
       <img 
-        :src="item.image_url" 
+        :src="item.thumbnail_url || item.image_url"
         :alt="item.title" 
-        loading="lazy" 
+        loading="lazy"
+        decoding="async"
         class="w-full h-full object-cover transition-transform duration-700 group-hover:scale-110"
       />
       

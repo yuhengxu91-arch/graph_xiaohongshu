@@ -33,7 +33,7 @@
         <button 
           v-for="tab in [{id: 'mine', label: '我的模板', icon: '👤'}, {id: 'system', label: '公共模板', icon: '🏛️'}]" 
           :key="tab.id"
-          @click="currentTab = tab.id"
+          @click="switchTab(tab.id)"
           :class="[
             'flex items-center gap-2 px-6 py-2 rounded-xl text-sm font-bold transition-all duration-200',
             currentTab === tab.id 
@@ -143,8 +143,19 @@ import { getTemplatesList, deleteTemplate, saveTemplate, duplicateTemplate, publ
 const router = useRouter()
 
 const currentTab = ref('mine') // 'mine' or 'system'
-const templates = ref([])
-const loading = ref(false)
+const templatesByScope = ref({
+  mine: [],
+  system: [],
+})
+const loadingScopes = ref({
+  mine: false,
+  system: false,
+})
+const loadedScopes = ref({
+  mine: false,
+  system: false,
+})
+const loading = computed(() => loadingScopes.value[currentTab.value])
 
 const showEditor = ref(false)
 const editingTemplate = ref(null)
@@ -198,25 +209,31 @@ function handleCancelConfirm() {
 }
 
 const filteredTemplates = computed(() => {
-  return templates.value.filter(t => {
-    if (currentTab.value === 'system') return t.is_system === true
-    return !t.is_system
-  })
+  return templatesByScope.value[currentTab.value] || []
 })
 
 onMounted(() => {
-  loadTemplates()
+  loadTemplates('mine')
 })
 
-async function loadTemplates() {
-  loading.value = true
+async function switchTab(tabId) {
+  currentTab.value = tabId
+  await loadTemplates(tabId)
+}
+
+async function loadTemplates(scope, force = false) {
+  if (!force && loadedScopes.value[scope]) return
+  if (loadingScopes.value[scope]) return
+
+  loadingScopes.value[scope] = true
   try {
-    const res = await getTemplatesList({ scope: 'all' })
-    templates.value = res || []
+    const res = await getTemplatesList({ scope })
+    templatesByScope.value[scope] = res || []
+    loadedScopes.value[scope] = true
   } catch (e) {
     console.error('获取模板失败', e)
   } finally {
-    loading.value = false
+    loadingScopes.value[scope] = false
   }
 }
 
@@ -236,10 +253,10 @@ async function handleSaveTemplate(data) {
     const saved = await saveTemplate(data)
     
     if (isEdit) {
-      const idx = templates.value.findIndex(t => t.id === saved.id)
-      if (idx !== -1) templates.value[idx] = saved
+      const idx = templatesByScope.value.mine.findIndex(t => t.id === saved.id)
+      if (idx !== -1) templatesByScope.value.mine[idx] = saved
     } else {
-      templates.value.unshift(saved)
+      templatesByScope.value.mine.unshift(saved)
     }
     showEditor.value = false
     showToast('保存成功', 'success')
@@ -260,7 +277,7 @@ async function handleDelete(tpl) {
 
   try {
     await deleteTemplate(tpl.id)
-    templates.value = templates.value.filter(t => t.id !== tpl.id)
+    templatesByScope.value.mine = templatesByScope.value.mine.filter(t => t.id !== tpl.id)
     showToast('删除成功', 'success')
   } catch (e) {
     showToast(`删除失败: ${e.message}`, 'error')
@@ -270,8 +287,10 @@ async function handleDelete(tpl) {
 async function handleDuplicate(tpl) {
   try {
     const duplicated = await duplicateTemplate(tpl.id || tpl.name)
-    templates.value.unshift(duplicated)
-    currentTab.value = 'mine' // 切换到我的模板
+    if (loadedScopes.value.mine) {
+      templatesByScope.value.mine.unshift(duplicated)
+    }
+    await switchTab('mine')
     showToast('复制成功', 'success')
   } catch (e) {
     showToast(`复制失败: ${e.message}`, 'error')
@@ -290,8 +309,10 @@ async function handlePublish(tpl) {
 
   try {
     const published = await publishTemplate(tpl.id)
-    templates.value.unshift(published)
-    currentTab.value = 'system'
+    if (loadedScopes.value.system) {
+      templatesByScope.value.system.unshift(published)
+    }
+    await switchTab('system')
     showToast('发布成功', 'success')
   } catch (e) {
     showToast(`发布失败: ${e.response?.data?.detail || e.message}`, 'error')

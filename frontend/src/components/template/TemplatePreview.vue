@@ -5,6 +5,8 @@
       <img 
         v-if="template.thumbnail_url" 
         :src="template.thumbnail_url" 
+        loading="lazy"
+        decoding="async"
         class="w-full h-full object-cover transition-transform duration-500 group-hover:scale-110" 
       />
       <div 
