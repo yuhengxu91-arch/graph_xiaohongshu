@@ -49,7 +49,7 @@ class PosterService:
 
         # GPT Image 2（scdn）
         self.gpt_image_api_key = os.getenv("GPT_IMAGE_API_KEY", "")
-        self.gpt_image_base_url = os.getenv("GPT_IMAGE_BASE_URL", "https://api.scdn.online")
+        self.gpt_image_base_url = os.getenv("GPT_IMAGE_BASE_URL", "https://api-cn2.scdn.online")
         self.gpt_image_model = os.getenv("GPT_IMAGE_MODEL", "gpt-image-2")
 
         # 输出目录
