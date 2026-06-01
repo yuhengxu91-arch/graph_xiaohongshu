@@ -112,7 +112,7 @@ const emit = defineEmits(['update:filters', 'search'])
 
 const localFilters = reactive({
   keyword: props.filters.keyword || '',
-  only_mine: props.filters.only_mine || false,
+  only_mine: props.filters.only_mine ?? true,
   is_favorite: props.filters.is_favorite || false,
   is_template: props.filters.is_template || false,
   mode: props.filters.mode || '',

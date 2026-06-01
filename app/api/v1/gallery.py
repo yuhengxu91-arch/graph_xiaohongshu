@@ -135,7 +135,7 @@ async def get_gallery_list(
     date_to: Optional[date] = Query(default=None),
     sort_by: Literal["created_at", "updated_at", "title"] = Query(default="created_at"),
     order: Literal["asc", "desc"] = Query(default="desc"),
-    only_mine: bool = Query(default=False, description="仅显示当前用户的作品"),
+    only_mine: bool = Query(default=True, description="仅显示当前用户的作品"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -166,7 +166,7 @@ async def get_gallery_list(
 @router.get("/search", response_model=GalleryListResponse, summary="搜索作品")
 async def search_gallery(
     keyword: str = Query(..., min_length=1),
-    only_mine: bool = Query(default=False, description="仅搜索当前用户的作品"),
+    only_mine: bool = Query(default=True, description="仅搜索当前用户的作品"),
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=20, ge=1, le=100),
     current_user: User = Depends(get_current_user),
@@ -188,7 +188,7 @@ async def search_gallery(
 
 @router.get("/filters", response_model=FiltersResponse, summary="获取筛选项")
 async def get_gallery_filters(
-    only_mine: bool = Query(default=False, description="仅统计当前用户的作品"),
+    only_mine: bool = Query(default=True, description="仅统计当前用户的作品"),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ) -> FiltersResponse:
