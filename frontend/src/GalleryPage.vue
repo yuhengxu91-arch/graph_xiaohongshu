@@ -62,6 +62,7 @@
       @toggle-favorite="handleToggleFavorite"
       @delete="handleDeleteWork"
       @remix="remixWork"
+      @renamed="handleWorkRenamed"
     />
 
     <!-- 二次确认弹窗 -->
@@ -268,6 +269,12 @@ function remixWork(item) {
   savePosterRemixPayload(sessionStorage, payload)
   selectedItem.value = null
   router.push({ name: 'poster', query: { tab: payload.target_tab, remix: item.id } })
+}
+
+function handleWorkRenamed({ id, title }) {
+  // 同步列表中的标题
+  const item = workList.value.find(w => w.id === id)
+  if (item) item.title = title
 }
 
 // ============== 批量操作 ==============

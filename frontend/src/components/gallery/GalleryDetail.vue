@@ -35,9 +35,52 @@
             <span class="px-2.5 py-1 bg-blue-50 text-blue-600 rounded-lg text-xs font-bold uppercase tracking-wider">{{ formatMode(item.mode) }}</span>
             <span class="px-2.5 py-1 bg-slate-100 text-slate-500 rounded-lg text-xs font-bold">{{ item.aspect_ratio }}</span>
           </div>
-          <h2 class="text-2xl font-black text-slate-800 leading-tight">
-            {{ item.title || '未命名作品' }}
-          </h2>
+          <!-- 标题区域：内联编辑 -->
+          <div class="group relative">
+            <!-- 显示模式 -->
+            <div v-if="!isEditingTitle" class="flex items-center gap-2">
+              <h2 class="text-2xl font-black text-slate-800 leading-tight">
+                {{ item.title || '未命名作品' }}
+              </h2>
+              <button
+                class="opacity-0 group-hover:opacity-100 transition-opacity w-7 h-7 flex items-center justify-center text-slate-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg"
+                title="重命名"
+                @click="startEditTitle"
+              >
+                ✏️
+              </button>
+            </div>
+            <!-- 编辑模式 -->
+            <div v-else class="space-y-1" ref="editContainerRef">
+              <div class="flex items-center gap-2">
+                <input
+                  ref="titleInputRef"
+                  v-model="editTitleValue"
+                  type="text"
+                  maxlength="200"
+                  :disabled="isSubmittingTitle"
+                  class="flex-1 text-xl font-bold text-slate-800 border border-blue-300 rounded-lg px-3 py-1.5 focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
+                  @keydown.enter="submitTitle"
+                  @keydown.escape="cancelEditTitle"
+                />
+                <button
+                  :disabled="isSubmittingTitle"
+                  class="px-3 py-1.5 bg-blue-600 text-white text-sm font-bold rounded-lg hover:bg-blue-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  @click="submitTitle"
+                >
+                  确认
+                </button>
+                <button
+                  :disabled="isSubmittingTitle"
+                  class="px-3 py-1.5 bg-slate-100 text-slate-600 text-sm font-bold rounded-lg hover:bg-slate-200 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                  @click="cancelEditTitle"
+                >
+                  取消
+                </button>
+              </div>
+              <p v-if="titleError" class="text-red-500 text-xs font-medium">{{ titleError }}</p>
+            </div>
+          </div>
           <div class="flex items-center gap-2 text-slate-400 text-sm">
             <span>📅 创建于 {{ formatDate(item.created_at) }}</span>
           </div>
@@ -138,8 +181,9 @@
 </template>
 
 <script setup>
-import { ref, watch } from 'vue'
+import { ref, watch, nextTick, onMounted, onBeforeUnmount } from 'vue'
 import SalesSyncModal from '../common/SalesSyncModal.vue'
+import { renameGalleryWork } from '../../api.js'
 
 const props = defineProps({
   item: {
@@ -148,12 +192,84 @@ const props = defineProps({
   }
 })
 
-const emit = defineEmits(['close', 'toggle-favorite', 'delete', 'remix'])
+const emit = defineEmits(['close', 'toggle-favorite', 'delete', 'remix', 'renamed'])
 const salesModalOpen = ref(false)
+
+// ============== 内联编辑状态 ==============
+const isEditingTitle = ref(false)
+const editTitleValue = ref('')
+const isSubmittingTitle = ref(false)
+const titleError = ref('')
+const titleInputRef = ref(null)
+const editContainerRef = ref(null)
 
 watch(() => props.item.id, () => {
   salesModalOpen.value = false
+  cancelEditTitle()
 })
+
+// 点击外部区域取消编辑
+function handleClickOutside(event) {
+  if (
+    isEditingTitle.value &&
+    !isSubmittingTitle.value &&
+    editContainerRef.value &&
+    !editContainerRef.value.contains(event.target)
+  ) {
+    cancelEditTitle()
+  }
+}
+
+onMounted(() => {
+  document.addEventListener('mousedown', handleClickOutside)
+})
+
+onBeforeUnmount(() => {
+  document.removeEventListener('mousedown', handleClickOutside)
+})
+
+function startEditTitle() {
+  isEditingTitle.value = true
+  editTitleValue.value = props.item.title || ''
+  titleError.value = ''
+  nextTick(() => {
+    titleInputRef.value?.focus()
+    titleInputRef.value?.select()
+  })
+}
+
+function cancelEditTitle() {
+  isEditingTitle.value = false
+  editTitleValue.value = ''
+  titleError.value = ''
+  isSubmittingTitle.value = false
+}
+
+async function submitTitle() {
+  // 校验：空标题或纯空白
+  const trimmed = editTitleValue.value.trim()
+  if (!trimmed) {
+    titleError.value = '名称不能为空'
+    return
+  }
+
+  titleError.value = ''
+  isSubmittingTitle.value = true
+
+  try {
+    const result = await renameGalleryWork(props.item.id, editTitleValue.value)
+    // 更新本地状态
+    props.item.title = result.title
+    props.item.updated_at = result.updated_at
+    isEditingTitle.value = false
+    emit('renamed', { id: result.id, title: result.title, updated_at: result.updated_at })
+  } catch (e) {
+    // 失败时恢复输入框为可编辑状态，保留用户输入内容
+    titleError.value = e.response?.data?.detail || '重命名失败，请重试'
+  } finally {
+    isSubmittingTitle.value = false
+  }
+}
 
 function formatMode(mode) {
   const map = {

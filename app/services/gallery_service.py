@@ -220,6 +220,38 @@ class GalleryService:
         await db.flush()
         return self.serialize_work(work, detail=True)
 
+    async def rename_work(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: UUID,
+        work_id: UUID,
+        new_title: str,
+    ) -> Optional[dict[str, Any]]:
+        """
+        重命名作品。
+
+        返回更新后的作品序列化字典，若作品不存在或不属于当前用户则返回 None。
+        空标题（strip 后长度为 0）也返回 None。
+        """
+        work = await self._get_owned_work(db, user_id=user_id, work_id=work_id)
+        if not work:
+            return None
+
+        cleaned_title = new_title.strip()
+        if not cleaned_title:
+            return None
+
+        work.title = cleaned_title[:200]
+        work.updated_at = datetime.utcnow()
+        await db.flush()
+
+        return {
+            "id": str(work.id),
+            "title": work.title,
+            "updated_at": work.updated_at.isoformat(),
+        }
+
     async def delete_work(
         self,
         db: AsyncSession,

@@ -97,6 +97,23 @@ class BatchDeleteResponse(BaseModel):
     deleted_count: int
 
 
+class RenameWorkRequest(BaseModel):
+    """重命名请求体"""
+    new_title: str = Field(
+        ...,
+        min_length=1,
+        max_length=200,
+        description="新的作品名称，1-200 个字符",
+    )
+
+
+class RenameWorkResponse(BaseModel):
+    """重命名响应体"""
+    id: str
+    title: str
+    updated_at: str
+
+
 class BatchTagRequest(BaseModel):
     ids: list[UUID] = Field(..., min_length=1)
     tags: list[str] = Field(..., min_length=1)
@@ -213,6 +230,31 @@ async def batch_tag_gallery(
             )
         )
     )
+
+
+@router.patch(
+    "/{work_id}/rename",
+    response_model=RenameWorkResponse,
+    summary="重命名作品",
+)
+async def rename_gallery_work(
+    work_id: UUID,
+    request: RenameWorkRequest,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+) -> RenameWorkResponse:
+    result = await gallery_service.rename_work(
+        db,
+        user_id=current_user.id,
+        work_id=work_id,
+        new_title=request.new_title,
+    )
+    if not result:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="作品不存在或无权修改",
+        )
+    return RenameWorkResponse(**result)
 
 
 @router.get("/{work_id}", response_model=GalleryWorkDetail, summary="获取作品详情")

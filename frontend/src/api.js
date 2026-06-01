@@ -545,6 +545,16 @@ export async function updateGalleryWork(id, data) {
 }
 
 /**
+ * 重命名作品
+ * @param {string} id - 作品 UUID
+ * @param {string} newTitle - 新标题（1-200 字符）
+ */
+export async function renameGalleryWork(id, newTitle) {
+  const res = await api.patch(`/gallery/${id}/rename`, { new_title: newTitle })
+  return res.data
+}
+
+/**
  * 删除作品
  * @param {string} id - 作品 UUID
  */
