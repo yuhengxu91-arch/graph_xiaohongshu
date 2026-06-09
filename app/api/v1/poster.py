@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_async_session
+from app.core.limits import IMAGE_PROMPT_MAX_LENGTH
 from app.dependencies.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.services.brand_service import brand_service
@@ -24,7 +25,7 @@ router = APIRouter(prefix="/poster", tags=["Poster"])
 
 class CustomGenerateRequest(BaseModel):
     """自定义生成请求"""
-    prompt: str = Field(..., description="用户输入的提示词", min_length=1, max_length=500)
+    prompt: str = Field(..., description="用户输入的提示词", min_length=1, max_length=IMAGE_PROMPT_MAX_LENGTH)
     style_tags: Optional[List[str]] = Field(None, description="风格标签名称列表")
     aspect_ratio: str = Field("3:4", description="输出比例: 3:4 / 2.35:1 / 9:16 / 1:1 / 16:9")
     color_tone: Optional[str] = Field(None, description="色调偏好")
@@ -42,7 +43,7 @@ class TemplateGenerateRequest(BaseModel):
 class EditGenerateRequest(BaseModel):
     """以图改图请求"""
     image_base64: str = Field(..., description="原始图片的 base64 编码数据")
-    edit_prompt: str = Field(..., description="编辑指令", min_length=1, max_length=500)
+    edit_prompt: str = Field(..., description="编辑指令", min_length=1, max_length=IMAGE_PROMPT_MAX_LENGTH)
     aspect_ratio: str = Field("3:4", description="输出比例")
 
 
@@ -452,7 +453,7 @@ class InpaintRequest(BaseModel):
     """局部重绘请求"""
     image_base64: str = Field(..., description="原始图片的 base64 编码数据")
     mask_base64: str = Field(..., description="遮罩图片的 base64 编码数据（白色=重绘区域）")
-    inpaint_prompt: str = Field(..., description="重绘提示词", min_length=1, max_length=500)
+    inpaint_prompt: str = Field(..., description="重绘提示词", min_length=1, max_length=IMAGE_PROMPT_MAX_LENGTH)
     aspect_ratio: str = Field("3:4", description="输出比例")
 
 

@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_async_session
+from app.core.limits import IMAGE_PROMPT_MAX_LENGTH
 from app.dependencies.auth import get_current_user_optional
 from app.models.user import User
 from app.services.brand_service import brand_service
@@ -28,7 +29,7 @@ class BatchItemInput(BaseModel):
     """单条批量生成内容"""
     title: str = Field("", description="主标题（可选）")
     subtitle: str = Field("", description="副标题（可选）")
-    prompt: str = Field(..., description="画面描述/提示词（必填）", min_length=1, max_length=500)
+    prompt: str = Field(..., description="画面描述/提示词（必填）", min_length=1, max_length=IMAGE_PROMPT_MAX_LENGTH)
 
 
 class BatchGenerateRequest(BaseModel):
