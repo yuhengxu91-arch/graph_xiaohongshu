@@ -394,13 +394,29 @@ async def download_batch(task_id: str):
     "/{task_id}/retry",
     summary="重试所有失败的子任务",
 )
-async def retry_failed(task_id: str):
+async def retry_failed(task_id: str, background_tasks: BackgroundTasks):
     """
     重新生成批量任务中所有状态为 failed 的子任务
 
     重试时保留原有参数和系列风格锚定配置
     """
-    result = await batch_service.retry_failed_items(task_id)
-    if result is None:
+    status = batch_service.get_batch_status(task_id)
+    if status is None:
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
-    return result
+
+    failed_count = status.get("failed_count", 0)
+    if failed_count <= 0:
+        return {
+            "task_id": task_id,
+            "retried_count": 0,
+            "queued": False,
+            "message": "没有需要重试的失败项",
+        }
+
+    background_tasks.add_task(batch_service.retry_failed_items, task_id)
+    return {
+        "task_id": task_id,
+        "retried_count": failed_count,
+        "queued": True,
+        "message": "失败项已加入后台重试队列",
+    }

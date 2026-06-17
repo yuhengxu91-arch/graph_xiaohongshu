@@ -1,0 +1,34 @@
+import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
+import { test } from 'node:test'
+
+const apiSource = readFileSync(
+  new URL('../src/api.js', import.meta.url),
+  'utf8'
+)
+const posterPageSource = readFileSync(
+  new URL('../src/PosterPage.vue', import.meta.url),
+  'utf8'
+)
+const resultDisplaySource = readFileSync(
+  new URL('../src/components/poster/ResultDisplay.vue', import.meta.url),
+  'utf8'
+)
+
+test('single template generation submits a background template task', () => {
+  const fn = apiSource.match(/export async function generateTemplatePoster[\s\S]*?\n}/)?.[0] || ''
+
+  assert.match(fn, /\/poster\/batch\/template/)
+  assert.match(fn, /items:\s*\[/)
+  assert.doesNotMatch(fn, /\/poster\/generate\/template/)
+  assert.match(posterPageSource, /generateWithWrapper\('template', payload\)/)
+})
+
+test('result display exposes retry for failed background generation items', () => {
+  assert.match(apiSource, /export async function retryBatchTask/)
+  assert.match(resultDisplaySource, /retryBatchTask/)
+  assert.match(resultDisplaySource, /重试失败项/)
+  assert.match(resultDisplaySource, /failed_count/)
+  assert.match(resultDisplaySource, /salesImageUrl/)
+  assert.match(resultDisplaySource, /total_count === 1/)
+})

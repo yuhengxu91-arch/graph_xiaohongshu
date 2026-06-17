@@ -61,7 +61,18 @@
               <span v-else>✅</span>
               批量生成 · {{ batchStatusLabel }}
             </h3>
-            <div class="text-xs font-mono text-slate-400">{{ result.task_id?.slice(0,8) }}</div>
+            <div class="flex items-center gap-3">
+              <button
+                v-if="canRetryBatch"
+                type="button"
+                class="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white rounded-xl text-xs font-black transition-all active:scale-95"
+                :disabled="batchRetrying"
+                @click="retryFailedBatchItems"
+              >
+                {{ batchRetrying ? '重试中...' : '重试失败项' }}
+              </button>
+              <div class="text-xs font-mono text-slate-400">{{ result.task_id?.slice(0,8) }}</div>
+            </div>
           </div>
           <div v-if="batchStatus" class="space-y-2">
             <div class="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
@@ -147,9 +158,9 @@
     </div>
 
     <SalesSyncModal
-      v-if="result?.image_url"
+      v-if="salesImageUrl"
       :is-open="salesModalOpen"
-      :image-url="result.image_url"
+      :image-url="salesImageUrl"
       @close="salesModalOpen = false"
     />
   </div>
@@ -157,7 +168,7 @@
 
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
-import { getBatchStatus } from '../../api.js'
+import { getBatchStatus, retryBatchTask } from '../../api.js'
 import SalesSyncModal from '../common/SalesSyncModal.vue'
 
 const props = defineProps({
@@ -176,6 +187,7 @@ function getImageUrl(url) {
 
 const batchStatus = ref(null)
 const batchPolling = ref(false)
+const batchRetrying = ref(false)
 const salesModalOpen = ref(false)
 let pollTimer = null
 
@@ -197,8 +209,27 @@ const batchStatusLabel = computed(() => {
 })
 
 const canSyncToSales = computed(() => {
-  if (!props.result?.success || !props.result?.image_url) return false
-  return !['batch', 'export_all'].includes(props.result.mode)
+  if (!props.result?.success) return false
+  return Boolean(salesImageUrl.value)
+})
+
+const singleBatchSuccessItem = computed(() => {
+  if (props.result?.mode !== 'batch') return null
+  if (batchStatus.value?.total_count === 1) {
+    return batchStatus.value.items?.find(item => item.status === 'success' && item.image_url) || null
+  }
+  return null
+})
+
+const salesImageUrl = computed(() => {
+  if (props.result?.image_url && props.result.mode !== 'export_all') return props.result.image_url
+  return singleBatchSuccessItem.value?.image_url || ''
+})
+
+const canRetryBatch = computed(() => {
+  if (!props.result?.success || props.result.mode !== 'batch' || !props.result.task_id) return false
+  if (!batchStatus.value?.failed_count) return false
+  return ['partial_failed', 'failed'].includes(batchStatus.value.status)
 })
 
 function openSalesModal() {
@@ -210,6 +241,10 @@ function resetSalesState() {
 }
 
 async function pollBatch(taskId) {
+  if (pollTimer) {
+    clearTimeout(pollTimer)
+    pollTimer = null
+  }
   batchPolling.value = true
   try {
     const data = await getBatchStatus(taskId)
@@ -227,10 +262,24 @@ async function pollBatch(taskId) {
   }
 }
 
+async function retryFailedBatchItems() {
+  if (!props.result?.task_id || batchRetrying.value) return
+  batchRetrying.value = true
+  try {
+    await retryBatchTask(props.result.task_id)
+    await pollBatch(props.result.task_id)
+  } catch (e) {
+    console.error('重试失败项失败:', e)
+  } finally {
+    batchRetrying.value = false
+  }
+}
+
 watch(() => props.result, (val) => {
   if (pollTimer) { clearTimeout(pollTimer); pollTimer = null }
   batchStatus.value = null
   batchPolling.value = false
+  batchRetrying.value = false
   resetSalesState()
 
   if (val?.success && val?.mode === 'batch' && val?.task_id) {

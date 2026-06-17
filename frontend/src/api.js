@@ -370,12 +370,23 @@ export async function generatePromptOnly(data) {
 }
 
 /**
- * 模板生成海报
- * @param {Object} data - { template_index, params, style_tag?, color_option?, aspect_ratio? }
+ * 模板生成海报（提交后台任务，避免长时间同步请求误判失败）
+ * @param {Object} data - { template_id, params, style_tag?, color_option?, aspect_ratio? }
  */
 export async function generateTemplatePoster(data) {
-  const res = await api.post('/poster/generate/template', data)
-  return res.data
+  const params = data.params || {}
+  const title = Object.values(params)
+    .map(value => String(value || '').trim())
+    .find(Boolean) || '模板任务'
+
+  const res = await api.post('/poster/batch/template', {
+    template_id: data.template_id,
+    items: [{ title, params }],
+    style_tag: data.style_tag,
+    color_option: data.color_option,
+    aspect_ratio: data.aspect_ratio,
+  })
+  return { ...res.data, mode: 'batch' }
 }
 
 /**
@@ -456,6 +467,15 @@ export async function appendTemplateBatchItems(taskId, data) {
  */
 export async function getBatchStatus(taskId) {
   const res = await api.get(`/poster/batch/${taskId}/status`)
+  return res.data
+}
+
+/**
+ * 重试批量任务中的失败项
+ * @param {string} taskId - 任务 ID
+ */
+export async function retryBatchTask(taskId) {
+  const res = await api.post(`/poster/batch/${taskId}/retry`)
   return res.data
 }
 
