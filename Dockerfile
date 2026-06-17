@@ -12,14 +12,9 @@
 
 FROM python:3.13-slim
 
-# ---- 系统依赖 ----
-# libpq-dev: PostgreSQL 客户端库（asyncpg / psycopg 编译依赖）
-# gcc: C 编译器（部分 Python 包需要编译原生扩展）
-RUN apt-get update && \
-    apt-get install -y --no-install-recommends \
-    libpq-dev \
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# ---- Python 依赖优先使用 binary wheels ----
+# requirements.txt 使用 psycopg[binary,pool]，无需在发版时安装 libpq-dev/gcc。
+# 避免访问 Debian apt 源，减少线上构建卡住的概率。
 
 # ---- 工作目录 ----
 WORKDIR /app
