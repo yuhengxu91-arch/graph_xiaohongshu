@@ -386,7 +386,7 @@ export async function generateTemplatePoster(data) {
     color_option: data.color_option,
     aspect_ratio: data.aspect_ratio,
   })
-  return { ...res.data, mode: 'batch' }
+  return { ...res.data, mode: 'batch', display_mode: 'single' }
 }
 
 /**

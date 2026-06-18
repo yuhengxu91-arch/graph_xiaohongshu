@@ -32,3 +32,11 @@ test('result display exposes retry for failed background generation items', () =
   assert.match(resultDisplaySource, /salesImageUrl/)
   assert.match(resultDisplaySource, /total_count === 1/)
 })
+
+test('single background template task renders as one large poster instead of batch grid', () => {
+  assert.match(resultDisplaySource, /isSingleBatchTask/)
+  assert.match(resultDisplaySource, /singleBatchDisplayItem/)
+  assert.match(resultDisplaySource, /v-else-if="isSingleBatchTask"/)
+  assert.match(resultDisplaySource, /单张生成/)
+  assert.match(resultDisplaySource, /max-w-lg lg:max-w-2xl/)
+})

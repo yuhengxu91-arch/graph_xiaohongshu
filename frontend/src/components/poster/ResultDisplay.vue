@@ -52,6 +52,82 @@
         </div>
       </div>
 
+      <!-- 单张后台任务：保持后台生成逻辑，但按单图结果展示 -->
+      <div v-else-if="isSingleBatchTask" class="space-y-6">
+        <div class="p-6 bg-blue-50/50 rounded-[2rem] border border-blue-100 space-y-4">
+          <div class="flex items-center justify-between gap-4">
+            <h3 class="text-lg font-black text-slate-800 flex items-center gap-2">
+              <span v-if="batchPolling" class="w-4 h-4 border-2 border-blue-600 border-t-transparent rounded-full animate-spin"></span>
+              <span v-else-if="singleBatchDisplayItem?.status === 'failed'">⚠️</span>
+              <span v-else>✅</span>
+              单张生成 · {{ batchStatusLabel }}
+            </h3>
+            <div class="flex items-center gap-3">
+              <button
+                v-if="canRetryBatch"
+                type="button"
+                class="px-3 py-1.5 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white rounded-xl text-xs font-black transition-all active:scale-95"
+                :disabled="batchRetrying"
+                @click="retryFailedBatchItems"
+              >
+                {{ batchRetrying ? '重试中...' : '重试失败项' }}
+              </button>
+              <div class="text-xs font-mono text-slate-400">{{ result.task_id?.slice(0,8) }}</div>
+            </div>
+          </div>
+          <div v-if="batchStatus" class="space-y-2">
+            <div class="w-full h-3 bg-slate-200 rounded-full overflow-hidden">
+              <div class="h-full bg-blue-600 rounded-full transition-all duration-500" :style="{ width: batchProgress + '%' }"></div>
+            </div>
+            <div class="flex justify-between text-xs font-bold text-slate-500">
+              <span>后台任务进度</span>
+              <span>{{ batchStatus.success_count + batchStatus.failed_count }} / {{ batchStatus.total_count }}</span>
+            </div>
+          </div>
+          <div v-else class="text-sm text-slate-500">任务已提交，正在加载进度...</div>
+        </div>
+
+        <div class="relative group">
+          <div class="absolute -inset-4 bg-gradient-to-r from-blue-500/10 to-indigo-500/10 rounded-[3rem] blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
+          <div class="relative bg-slate-900 rounded-[2.5rem] p-4 shadow-2xl overflow-hidden border-8 border-slate-900 mx-auto max-w-lg lg:max-w-2xl min-h-[360px] flex items-center justify-center">
+            <img
+              v-if="singleBatchDisplayItem?.status === 'success' && singleBatchDisplayItem.image_url"
+              :src="getImageUrl(singleBatchDisplayItem.image_url)"
+              alt="生成的海报"
+              class="w-full h-auto rounded-[1.5rem] shadow-inner"
+            />
+            <div v-else-if="singleBatchDisplayItem?.status === 'failed'" class="w-full min-h-[420px] bg-red-50 rounded-[1.5rem] flex flex-col items-center justify-center gap-4 p-8 text-center">
+              <span class="text-5xl">⚠️</span>
+              <div>
+                <div class="text-lg font-black text-red-600">生成失败</div>
+                <p class="mt-2 text-sm text-red-500 line-clamp-3">{{ singleBatchDisplayItem.error_message || '后台任务失败，请重试' }}</p>
+              </div>
+              <button
+                v-if="canRetryBatch"
+                type="button"
+                class="px-6 py-3 bg-red-600 hover:bg-red-700 disabled:bg-red-300 text-white rounded-2xl text-sm font-black transition-all active:scale-95"
+                :disabled="batchRetrying"
+                @click="retryFailedBatchItems"
+              >
+                {{ batchRetrying ? '重试中...' : '重试失败项' }}
+              </button>
+            </div>
+            <div v-else class="w-full min-h-[420px] bg-blue-50 rounded-[1.5rem] flex flex-col items-center justify-center gap-4 text-center">
+              <div class="w-12 h-12 border-[4px] border-blue-200 border-t-blue-600 rounded-full animate-spin"></div>
+              <div>
+                <div class="text-base font-black text-blue-600">后台生成中...</div>
+                <p class="mt-1 text-xs font-bold text-blue-300 uppercase tracking-widest">Single poster task</p>
+              </div>
+            </div>
+            <div v-if="singleBatchDisplayItem?.status === 'success' && singleBatchDisplayItem.image_url" class="absolute top-8 right-8 flex flex-col gap-2">
+              <a :href="getImageUrl(singleBatchDisplayItem.image_url)" download class="w-12 h-12 bg-white/90 backdrop-blur-md rounded-2xl flex items-center justify-center shadow-xl hover:bg-white hover:scale-110 active:scale-95 transition-all" title="下载原始图像">
+                <span class="text-xl">⬇️</span>
+              </a>
+            </div>
+          </div>
+        </div>
+      </div>
+
       <!-- 批量任务：进度 + 图片网格 -->
       <div v-else class="space-y-6">
         <div class="p-6 bg-blue-50/50 rounded-[2rem] border border-blue-100 space-y-4">
@@ -221,6 +297,20 @@ const singleBatchSuccessItem = computed(() => {
   return null
 })
 
+const singleBatchDisplayItem = computed(() => {
+  if (props.result?.mode !== 'batch') return null
+  if (batchStatus.value?.total_count === 1) {
+    return batchStatus.value.items?.[0] || null
+  }
+  return null
+})
+
+const isSingleBatchTask = computed(() => {
+  if (props.result?.mode !== 'batch') return false
+  if (props.result.display_mode === 'single') return true
+  return batchStatus.value?.total_count === 1
+})
+
 const salesImageUrl = computed(() => {
   if (props.result?.image_url && props.result.mode !== 'export_all') return props.result.image_url
   return singleBatchSuccessItem.value?.image_url || ''
@@ -300,7 +390,7 @@ const map = {
   adapt: { label: '多端适配', tailwind: 'bg-cyan-100 text-cyan-700' },
   export_all: { label: '全端全家桶', tailwind: 'bg-purple-100 text-purple-700' },
   style_transfer: { label: '风格迁移', tailwind: 'bg-fuchsia-100 text-fuchsia-700' },
-  batch: { label: '极速大批量', tailwind: 'bg-teal-100 text-teal-700' },
+  batch: { label: '后台生成', tailwind: 'bg-teal-100 text-teal-700' },
 }
 
 const badgeTailwindClass = computed(() => {
@@ -310,6 +400,7 @@ const badgeTailwindClass = computed(() => {
 
 const modeLabel = computed(() => {
   if (!props.result) return ''
+  if (isSingleBatchTask.value) return '模板生成'
   return map[props.result.mode]?.label || props.result.mode || ''
 })
 </script>
