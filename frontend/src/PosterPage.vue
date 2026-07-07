@@ -31,6 +31,7 @@
           :templates="templates"
           :generating="generating"
           :prefill="panelPrefill"
+          :currentImageModel="currentImageModel"
           @generate="handleGenerateDispatch"
         />
 
@@ -94,6 +95,8 @@ import {
   getTemplatesList,
   getPosterStyles,
   getPosterAspectRatios,
+  getPreferences,
+  getImageModels,
 } from './api.js'
 import {
   consumePosterRemixPayload,
@@ -107,6 +110,8 @@ const activeTab = ref(route.query.tab || 'batch')
 const generating = ref(false)
 const generatedResult = ref(null)
 const panelPrefill = ref(null)
+const preferences = ref({})
+const imageModels = ref([])
 
 const tabs = [
   { id: 'batch', label: '批量生成', icon: '📦' },
@@ -128,6 +133,70 @@ const activePanel = computed(() => {
     case 'adapt': return PanelAdapt
     case 'style': return PanelStyle
     default: return PanelBatch
+  }
+})
+
+const builtinImageProviders = {
+  gemini: {
+    icon: '💎',
+    label: 'Gemini',
+    provider: 'xunruijie',
+    model: 'gemini-3-pro-image-preview',
+  },
+  gpt_image: {
+    icon: '🖼️',
+    label: 'GPT Image 2',
+    provider: 'scdn',
+    model: 'gpt-image-2',
+  },
+  doubao: {
+    icon: '🎨',
+    label: '豆包 Seedream',
+    provider: '火山方舟',
+    model: 'doubao-seedream',
+  },
+}
+
+const currentImageModel = computed(() => {
+  const selectedModelId = preferences.value?.image_model_config_id
+  if (selectedModelId) {
+    const model = imageModels.value.find(item => item.id === selectedModelId)
+    if (model) {
+      return {
+        icon: providerIcon(model.provider_type),
+        label: model.name,
+        provider: providerLabel(model.provider_type),
+        model: model.model_name,
+        source: '个人选择',
+      }
+    }
+  }
+
+  const selectedProvider = preferences.value?.image_provider
+  if (selectedProvider && builtinImageProviders[selectedProvider]) {
+    return {
+      ...builtinImageProviders[selectedProvider],
+      source: '个人选择',
+    }
+  }
+
+  const defaultModel = imageModels.value.find(item => item.is_active && item.is_default)
+  if (defaultModel) {
+    return {
+      icon: providerIcon(defaultModel.provider_type),
+      label: defaultModel.name,
+      provider: providerLabel(defaultModel.provider_type),
+      model: defaultModel.model_name,
+      source: '系统默认',
+    }
+  }
+
+  return {
+    icon: '⚙️',
+    label: '系统默认',
+    provider: '.env',
+    model: '全局配置',
+    source: '系统默认',
   }
 })
 
@@ -155,6 +224,7 @@ onMounted(async () => {
     loadStyles(),
     loadTemplates(),
     loadAspectRatios(),
+    loadImageModelContext(),
   ])
   consumeRemixWork()
 })
@@ -263,6 +333,32 @@ async function loadAspectRatios() {
       { key: '2.35:1', label: '公众号', width: 1080, height: 460 },
     ]
   }
+}
+
+async function loadImageModelContext() {
+  try {
+    const [prefs, models] = await Promise.all([
+      getPreferences(),
+      getImageModels(false),
+    ])
+    preferences.value = prefs || {}
+    imageModels.value = models.items || []
+  } catch (e) {
+    console.error('加载当前图片模型失败:', e)
+  }
+}
+
+function providerLabel(type) {
+  if (type === 'openai_image') return 'OpenAI Image'
+  if (type === 'gemini') return 'Gemini'
+  if (type === 'doubao') return '豆包 Seedream'
+  return type || '未知供应商'
+}
+
+function providerIcon(type) {
+  if (type === 'gemini') return '💎'
+  if (type === 'doubao') return '🎨'
+  return '🖼️'
 }
 
 // ============== Api 统一执行外壳 ==============

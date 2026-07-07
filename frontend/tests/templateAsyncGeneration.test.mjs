@@ -14,6 +14,10 @@ const resultDisplaySource = readFileSync(
   new URL('../src/components/poster/ResultDisplay.vue', import.meta.url),
   'utf8'
 )
+const panelTemplateSource = readFileSync(
+  new URL('../src/components/poster/PanelTemplate.vue', import.meta.url),
+  'utf8'
+)
 
 test('single template generation submits a background template task', () => {
   const fn = apiSource.match(/export async function generateTemplatePoster[\s\S]*?\n}/)?.[0] || ''
@@ -39,4 +43,14 @@ test('single background template task renders as one large poster instead of bat
   assert.match(resultDisplaySource, /v-else-if="isSingleBatchTask"/)
   assert.match(resultDisplaySource, /单张生成/)
   assert.match(resultDisplaySource, /max-w-lg lg:max-w-2xl/)
+})
+
+test('template panel shows the current image model provider', () => {
+  assert.match(posterPageSource, /getPreferences/)
+  assert.match(posterPageSource, /getImageModels/)
+  assert.match(posterPageSource, /currentImageModel/)
+  assert.match(posterPageSource, /:currentImageModel="currentImageModel"/)
+  assert.match(panelTemplateSource, /currentImageModel/)
+  assert.match(panelTemplateSource, /当前模型/)
+  assert.match(panelTemplateSource, /currentImageModel\.provider/)
 })

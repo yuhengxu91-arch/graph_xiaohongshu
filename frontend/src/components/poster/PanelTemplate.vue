@@ -68,8 +68,26 @@
             <p class="text-xs text-slate-400 font-medium">定制您的专属内容</p>
           </div>
         </div>
-        <div class="px-4 py-1.5 bg-blue-50 text-blue-600 text-[10px] font-black rounded-full uppercase tracking-widest border border-blue-100">
-          Template Config
+        <div class="flex items-center gap-3">
+          <div
+            v-if="currentImageModel"
+            class="hidden sm:flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-2xl shadow-sm max-w-[20rem]"
+            :title="`${currentImageModel.label} · ${currentImageModel.provider} · ${currentImageModel.model}`"
+          >
+            <span class="text-base shrink-0">{{ currentImageModel.icon }}</span>
+            <div class="min-w-0 text-left">
+              <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
+                当前模型 · {{ currentImageModel.source }}
+              </div>
+              <div class="mt-1 text-xs font-black text-slate-700 truncate">
+                {{ currentImageModel.label }}
+                <span class="text-slate-400 font-bold">/ {{ currentImageModel.provider }}</span>
+              </div>
+            </div>
+          </div>
+          <div class="px-4 py-1.5 bg-blue-50 text-blue-600 text-[10px] font-black rounded-full uppercase tracking-widest border border-blue-100">
+            Template Config
+          </div>
         </div>
       </div>
 
@@ -265,6 +283,7 @@ const props = defineProps({
   aspectRatios: { type: Array, default: () => [] },
   generating: { type: Boolean, default: false },
   prefill: { type: Object, default: null },
+  currentImageModel: { type: Object, default: null },
 })
 
 const emit = defineEmits(['generate'])
