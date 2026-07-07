@@ -52,9 +52,9 @@ EXPOSE ${PORT}
 
 # ---- 启动命令 ----
 # 使用 uvicorn 启动 FastAPI 应用
-# --workers 2: 适合 1核2G 的 SAE 实例
+# batch 任务状态当前存储在进程内内存中，必须保持单 worker，避免轮询落到其他进程后 404。
 CMD uvicorn app.main:app \
     --host 0.0.0.0 \
     --port ${PORT} \
-    --workers 2 \
+    --workers 1 \
     --log-level info
