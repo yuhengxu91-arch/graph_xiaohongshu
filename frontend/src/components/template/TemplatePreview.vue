@@ -1,5 +1,5 @@
 <template>
-  <div class="group bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col h-full">
+  <div class="group bg-white rounded-2xl overflow-hidden border border-slate-100 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 flex flex-col h-full" :class="{ 'opacity-70': template.is_active === false }">
     <!-- 封面图部分 -->
     <div class="relative aspect-video overflow-hidden bg-slate-50">
       <img 
@@ -42,6 +42,9 @@
       <div v-if="isSystem" class="absolute top-3 left-3 px-2 py-0.5 bg-blue-600 text-[10px] font-bold text-white rounded-md shadow-sm uppercase tracking-wider">
         Public
       </div>
+      <div v-if="isSystem && template.is_active === false" class="absolute top-3 right-3 px-2 py-0.5 bg-slate-900 text-[10px] font-bold text-white rounded-md shadow-sm">
+        已下架
+      </div>
     </div>
     
     <!-- 内容区 -->
@@ -75,17 +78,32 @@
     <div class="px-5 py-4 bg-slate-50/50 border-t border-slate-100 flex gap-2">
       <button 
         @click.stop="$emit('use')"
-        class="flex-1 px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl shadow-sm hover:bg-black active:scale-95 transition-all"
+        :disabled="isSystem && template.is_active === false"
+        class="flex-1 px-4 py-2 bg-slate-900 text-white text-xs font-bold rounded-xl shadow-sm hover:bg-black active:scale-95 transition-all disabled:bg-slate-200 disabled:text-slate-400 disabled:cursor-not-allowed"
       >
-        使用模板
+        {{ isSystem && template.is_active === false ? '已下架' : '使用模板' }}
       </button>
       <button 
-        v-if="isSystem && !selectionMode"
+        v-if="isSystem && !selectionMode && template.is_active !== false"
         @click.stop="$emit('duplicate')"
         class="px-4 py-2 bg-white text-slate-700 text-xs font-bold rounded-xl border border-slate-200 hover:bg-slate-50 active:scale-95 transition-all flex items-center gap-1.5"
       >
         <svg xmlns="http://www.w3.org/2000/svg" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><rect width="8" height="4" x="8" y="2" rx="1" ry="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/></svg>
         Fork
+      </button>
+      <button
+        v-if="isSystem && canManagePublic && !selectionMode && template.is_active !== false"
+        @click.stop="$emit('deactivate')"
+        class="px-4 py-2 bg-red-50 text-red-600 text-xs font-bold rounded-xl border border-red-100 hover:bg-red-100 active:scale-95 transition-all"
+      >
+        下架
+      </button>
+      <button
+        v-if="isSystem && canManagePublic && !selectionMode && template.is_active === false"
+        @click.stop="$emit('restore')"
+        class="px-4 py-2 bg-emerald-50 text-emerald-700 text-xs font-bold rounded-xl border border-emerald-100 hover:bg-emerald-100 active:scale-95 transition-all"
+      >
+        恢复
       </button>
       <button
         v-if="!isSystem && !selectionMode"
@@ -114,10 +132,14 @@ const props = defineProps({
   selectionMode: {
     type: Boolean,
     default: false
+  },
+  canManagePublic: {
+    type: Boolean,
+    default: false
   }
 })
 
-defineEmits(['use', 'edit', 'delete', 'duplicate', 'publish'])
+defineEmits(['use', 'edit', 'delete', 'duplicate', 'publish', 'deactivate', 'restore'])
 
 const placeholderBg = computed(() => {
   const hash = Array.from(props.template.name || 'T').reduce((acc, char) => acc + char.charCodeAt(0), 0)

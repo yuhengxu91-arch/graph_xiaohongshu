@@ -691,6 +691,28 @@ export async function publishTemplate(id) {
   return res.data
 }
 
+export async function deactivatePublicTemplate(id) {
+  const res = await api.post(`/templates/${id}/deactivate`)
+  return res.data
+}
+
+export async function restorePublicTemplate(id) {
+  const res = await api.post(`/templates/${id}/restore`)
+  return res.data
+}
+
+// ============== 后台人员管理 API ==============
+
+export async function getAdminUsers() {
+  const res = await api.get('/admin/users')
+  return res.data
+}
+
+export async function setAdminUserRole(userId, isAdmin) {
+  const res = await api.put(`/admin/users/${userId}/admin`, { is_admin: isAdmin })
+  return res.data
+}
+
 // ============== 个人中心 API (Profile) ==============
 // 注意：以下为包含部分 Mock 的桩代码以支持前端独立开发
 

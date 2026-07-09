@@ -8,9 +8,10 @@
   <!-- 主应用布局 (Stitch Framework) -->
   <div v-else class="bg-slate-50 text-slate-900 flex h-screen overflow-hidden w-full">
     <!-- 左侧侧边栏 -->
-    <AppSidebar 
+    <AppSidebar
       v-model="sidebarOpen"
       :activePage="activePage"
+      :can-manage-users="canManageUsers"
       :loading="loadingThreads"
       :threadList="threadList"
       :currentThreadId="currentThreadId"
@@ -94,6 +95,8 @@ function handleNavigate(pageName) {
 // ============== 认证状态 ==============
 const isLoggedIn = ref(false)
 const currentUsername = ref('')
+const currentUser = ref(null)
+const canManageUsers = computed(() => Boolean(currentUser.value?.is_admin))
 
 function handleProfileUpdated(newProfile) {
   if (newProfile && newProfile.nickname) {
@@ -106,9 +109,11 @@ async function checkAuth() {
   if (checkLoggedIn()) {
     try {
       const user = await getCurrentUser()
+      currentUser.value = user
       currentUsername.value = user.username
       isLoggedIn.value = true
     } catch (e) {
+      currentUser.value = null
       isLoggedIn.value = false
     }
   }
@@ -117,6 +122,7 @@ async function checkAuth() {
 function onLoginSuccess(username) {
   currentUsername.value = username
   isLoggedIn.value = true
+  checkAuth()
 }
 
 // 登出
@@ -124,6 +130,7 @@ function handleLogout() {
   logout()
   isLoggedIn.value = false
   currentUsername.value = ''
+  currentUser.value = null
   threadList.value = []
   if (workflowRef.value && workflowRef.value.resetWorkflow) {
     workflowRef.value.resetWorkflow()

@@ -7,12 +7,12 @@ from datetime import datetime
 from typing import Any, Optional
 from uuid import UUID
 
-from sqlalchemy import asc, select, update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.models.image_model import ImageModelConfig
 from app.models.user import User, UserPreference
+from app.services.admin_service import admin_service
 
 
 class ImageModelService:
@@ -21,18 +21,8 @@ class ImageModelService:
     VALID_PROVIDER_TYPES = {"openai_image", "gemini", "doubao"}
 
     async def is_admin(self, db: AsyncSession, user: User) -> bool:
-        """环境变量指定的用户名或最早创建的用户可管理模型。"""
-        configured = {
-            name.strip()
-            for name in settings.admin_usernames.split(",")
-            if name.strip()
-        }
-        if user.username in configured:
-            return True
-
-        result = await db.execute(select(User.id).order_by(asc(User.created_at)).limit(1))
-        first_user_id = result.scalar_one_or_none()
-        return first_user_id == user.id
+        """兼容旧调用，统一委托给通用管理员服务。"""
+        return await admin_service.is_admin(db, user)
 
     async def list_configs(
         self,

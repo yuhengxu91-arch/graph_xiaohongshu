@@ -12,6 +12,7 @@ from app.core.db import get_async_session
 from app.core.security import get_password_hash, verify_password, create_access_token
 from app.models.user import User
 from app.dependencies.auth import get_current_user
+from app.services.admin_service import admin_service
 
 router = APIRouter(prefix="/auth", tags=["Authentication"])
 
@@ -40,6 +41,7 @@ class UserInfoResponse(BaseModel):
     """用户信息响应"""
     id: str = Field(..., description="用户ID")
     username: str = Field(..., description="用户名")
+    is_admin: bool = Field(False, description="是否为管理员")
 
 
 class MessageResponse(BaseModel):
@@ -126,7 +128,8 @@ async def login(
 
 @router.get("/me", response_model=UserInfoResponse)
 async def get_current_user_info(
-    current_user: User = Depends(get_current_user)
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
 ) -> UserInfoResponse:
     """
     获取当前登录用户信息
@@ -139,5 +142,6 @@ async def get_current_user_info(
     """
     return UserInfoResponse(
         id=str(current_user.id),
-        username=current_user.username
+        username=current_user.username,
+        is_admin=await admin_service.is_admin(db, current_user),
     )

@@ -14,6 +14,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.db import get_async_session
 from app.dependencies.auth import get_current_user
 from app.models.user import User
+from app.services.admin_service import admin_service
 from app.services.template_service import template_service
 
 router = APIRouter(prefix="/templates", tags=["Templates"])
@@ -48,14 +49,25 @@ class UpdateTemplateRequest(BaseModel):
 async def list_templates(
     scope: str = Query(default="all", regex="^(all|system|mine)$"),
     category: Optional[str] = Query(default=None),
+    include_inactive: bool = Query(default=False),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
+    can_include_inactive = False
+    if include_inactive:
+        can_include_inactive = await admin_service.is_admin(db, current_user)
+        if not can_include_inactive:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="仅管理员可查看已下架模板",
+            )
+
     templates = await template_service.list_templates(
         db,
         user_id=current_user.id,
         scope=scope,
         category=category,
+        include_inactive=can_include_inactive,
     )
     return templates
 
@@ -152,3 +164,43 @@ async def publish_template(
             detail="模板不存在或无权发布",
         )
     return template_service.serialize(published)
+
+
+async def _ensure_admin(db: AsyncSession, current_user: User) -> None:
+    if not await admin_service.is_admin(db, current_user):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="仅管理员可执行该操作",
+        )
+
+
+@router.post("/{template_id}/deactivate", summary="管理员下架公共模板")
+async def deactivate_public_template(
+    template_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    await _ensure_admin(db, current_user)
+    tpl = await template_service.deactivate_public_template(db, template_id=template_id)
+    if tpl is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="公共模板不存在",
+        )
+    return template_service.serialize(tpl)
+
+
+@router.post("/{template_id}/restore", summary="管理员恢复公共模板")
+async def restore_public_template(
+    template_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    await _ensure_admin(db, current_user)
+    tpl = await template_service.restore_public_template(db, template_id=template_id)
+    if tpl is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="公共模板不存在",
+        )
+    return template_service.serialize(tpl)

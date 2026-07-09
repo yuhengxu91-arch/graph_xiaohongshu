@@ -68,11 +68,14 @@
           :key="tpl.id || tpl.name"
           :template="tpl"
           :is-system="currentTab === 'system'"
+          :can-manage-public="canManagePublicTemplates"
           @use="useTemplate(tpl)"
           @edit="openEditModal(tpl)"
           @delete="handleDelete(tpl)"
           @duplicate="handleDuplicate(tpl)"
           @publish="handlePublish(tpl)"
+          @deactivate="handleDeactivatePublicTemplate(tpl)"
+          @restore="handleRestorePublicTemplate(tpl)"
         />
       </div>
       
@@ -138,7 +141,16 @@ import { useRouter } from 'vue-router'
 import TemplatePreview from './components/template/TemplatePreview.vue'
 import TemplateEditor from './components/template/TemplateEditor.vue'
 import ConfirmModal from './components/common/ConfirmModal.vue'
-import { getTemplatesList, deleteTemplate, saveTemplate, duplicateTemplate, publishTemplate } from './api.js'
+import {
+  getCurrentUser,
+  getTemplatesList,
+  deleteTemplate,
+  saveTemplate,
+  duplicateTemplate,
+  publishTemplate,
+  deactivatePublicTemplate,
+  restorePublicTemplate,
+} from './api.js'
 
 const router = useRouter()
 
@@ -156,6 +168,8 @@ const loadedScopes = ref({
   system: false,
 })
 const loading = computed(() => loadingScopes.value[currentTab.value])
+const currentUser = ref(null)
+const canManagePublicTemplates = computed(() => Boolean(currentUser.value?.is_admin))
 
 const showEditor = ref(false)
 const editingTemplate = ref(null)
@@ -212,9 +226,18 @@ const filteredTemplates = computed(() => {
   return templatesByScope.value[currentTab.value] || []
 })
 
-onMounted(() => {
+onMounted(async () => {
+  await loadCurrentUser()
   loadTemplates('mine')
 })
+
+async function loadCurrentUser() {
+  try {
+    currentUser.value = await getCurrentUser()
+  } catch (e) {
+    currentUser.value = null
+  }
+}
 
 async function switchTab(tabId) {
   currentTab.value = tabId
@@ -227,7 +250,11 @@ async function loadTemplates(scope, force = false) {
 
   loadingScopes.value[scope] = true
   try {
-    const res = await getTemplatesList({ scope })
+    const params = { scope }
+    if (scope === 'system' && canManagePublicTemplates.value) {
+      params.include_inactive = true
+    }
+    const res = await getTemplatesList(params)
     templatesByScope.value[scope] = res || []
     loadedScopes.value[scope] = true
   } catch (e) {
@@ -316,6 +343,37 @@ async function handlePublish(tpl) {
     showToast('发布成功', 'success')
   } catch (e) {
     showToast(`发布失败: ${e.response?.data?.detail || e.message}`, 'error')
+  }
+}
+
+async function handleDeactivatePublicTemplate(tpl) {
+  const confirmed = await showConfirm({
+    title: '下架公共模板',
+    message: `下架后《${tpl.name}》将不再对普通用户展示，历史记录和已 Fork 副本不会被删除。继续？`,
+    confirmText: '确认下架',
+    cancelText: '取消',
+    danger: true
+  })
+  if (!confirmed) return
+
+  try {
+    const updated = await deactivatePublicTemplate(tpl.id)
+    const idx = templatesByScope.value.system.findIndex(t => t.id === updated.id)
+    if (idx !== -1) templatesByScope.value.system[idx] = updated
+    showToast('已下架公共模板', 'success')
+  } catch (e) {
+    showToast(`下架失败: ${e.response?.data?.detail || e.message}`, 'error')
+  }
+}
+
+async function handleRestorePublicTemplate(tpl) {
+  try {
+    const updated = await restorePublicTemplate(tpl.id)
+    const idx = templatesByScope.value.system.findIndex(t => t.id === updated.id)
+    if (idx !== -1) templatesByScope.value.system[idx] = updated
+    showToast('已恢复公共模板', 'success')
+  } catch (e) {
+    showToast(`恢复失败: ${e.response?.data?.detail || e.message}`, 'error')
   }
 }
 

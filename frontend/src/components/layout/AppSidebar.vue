@@ -83,6 +83,31 @@
           </div>
         </a>
       </div>
+
+      <div v-if="canManageUsers" class="pt-4">
+        <div class="text-xs font-semibold text-slate-400 mb-2 uppercase tracking-wider px-3 overflow-hidden whitespace-nowrap"
+             :class="modelValue ? 'opacity-100' : 'opacity-0 h-0 mb-0'">
+          系统管理
+        </div>
+        <a v-for="item in adminNavItems" :key="item.name"
+           @click="navigateTo(item.path)"
+           data-nav-item
+           class="flex items-center space-x-3 px-3 py-2.5 rounded-xl mb-1 cursor-pointer transition-colors relative group overflow-hidden"
+           :class="[
+             isActive(item.path)
+               ? 'bg-blue-50 text-blue-700'
+               : 'text-slate-600 hover:bg-slate-50 hover:text-slate-900',
+             !modelValue && 'justify-center px-0'
+           ]"
+           :title="!modelValue ? item.name : ''">
+          <span class="text-xl shrink-0" :class="isActive(item.path) ? 'scale-110 transition-transform' : ''">{{ item.icon }}</span>
+          <span class="font-medium whitespace-nowrap transition-opacity duration-200" v-show="modelValue">{{ item.name }}</span>
+
+          <div v-if="!modelValue" class="absolute left-full ml-2 px-2 py-1 bg-slate-800 text-white text-xs rounded opacity-0 group-hover:opacity-100 pointer-events-none whitespace-nowrap z-50 transition-opacity">
+            {{ item.name }}
+          </div>
+        </a>
+      </div>
     </nav>
   </div>
 </template>
@@ -110,6 +135,10 @@ const props = defineProps({
   currentThreadId: {
     type: String,
     default: ''
+  },
+  canManageUsers: {
+    type: Boolean,
+    default: false
   }
 })
 
@@ -134,6 +163,10 @@ const assetNavItems = [
   { name: '预设模板', icon: '📋', path: 'template_center' },
   { name: '提示词库', icon: '📝', path: 'prompt_library' },
   { name: '品牌包设置', icon: '💎', path: 'brand' },
+]
+
+const adminNavItems = [
+  { name: '人员管理', icon: '👥', path: 'admin_users' },
 ]
 
 const isActive = (path) => props.activePage === path || (props.activePage === null && path === 'workflow')

@@ -106,6 +106,7 @@ Desktop.ini
 _agent/
 _agents/
 .gemini/
+.kiro/
 .cursor/
 .cursorrules
 

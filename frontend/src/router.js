@@ -17,6 +17,7 @@ const TemplateCenterPage = () => import('./TemplateCenterPage.vue')
 const ProfilePage = () => import('./ProfilePage.vue')
 const PlatformPage = () => import('./PlatformPage.vue')
 const PromptLibraryPage = () => import('./PromptLibraryPage.vue')
+const AdminUsersPage = () => import('./AdminUsersPage.vue')
 
 const routes = [
   {
@@ -71,6 +72,11 @@ const routes = [
         path: 'prompt-library',
         name: 'prompt_library',
         component: PromptLibraryPage
+      },
+      {
+        path: 'admin/users',
+        name: 'admin_users',
+        component: AdminUsersPage
       }
     ]
   }

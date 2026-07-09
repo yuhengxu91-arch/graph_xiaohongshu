@@ -33,12 +33,15 @@ class TemplateService:
         user_id: UUID,
         scope: str = "all",     # all | system | mine
         category: Optional[str] = None,
+        include_inactive: bool = False,
     ) -> list[dict[str, Any]]:
         """
         获取模板列表。
         scope: all = 公共+个人; system = 仅公共; mine = 仅个人
         """
-        stmt = select(PosterTemplate).where(PosterTemplate.is_active == True)
+        stmt = select(PosterTemplate)
+        if not include_inactive:
+            stmt = stmt.where(PosterTemplate.is_active == True)
 
         if scope == "system":
             stmt = stmt.where(PosterTemplate.is_system == True)
@@ -151,6 +154,40 @@ class TemplateService:
         await db.delete(tpl)
         await db.flush()
         return True
+
+    async def deactivate_public_template(
+        self,
+        db: AsyncSession,
+        *,
+        template_id: UUID,
+    ) -> Optional[PosterTemplate]:
+        """管理员下架公共模板，保留历史数据和 Fork 来源。"""
+        tpl = await self.get_template(db, template_id=template_id)
+        if tpl is None or not tpl.is_system:
+            return None
+
+        tpl.is_active = False
+        tpl.updated_at = datetime.utcnow()
+        await db.flush()
+        await db.refresh(tpl)
+        return tpl
+
+    async def restore_public_template(
+        self,
+        db: AsyncSession,
+        *,
+        template_id: UUID,
+    ) -> Optional[PosterTemplate]:
+        """管理员恢复已下架公共模板。"""
+        tpl = await self.get_template(db, template_id=template_id)
+        if tpl is None or not tpl.is_system:
+            return None
+
+        tpl.is_active = True
+        tpl.updated_at = datetime.utcnow()
+        await db.flush()
+        await db.refresh(tpl)
+        return tpl
 
     # =====================================================
     # Fork 公共模板

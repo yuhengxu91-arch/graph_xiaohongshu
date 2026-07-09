@@ -62,6 +62,10 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
         if engine.dialect.name == "postgresql":
             await conn.execute(text(
+                "ALTER TABLE users "
+                "ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"
+            ))
+            await conn.execute(text(
                 "ALTER TABLE user_preferences "
                 "ADD COLUMN IF NOT EXISTS image_model_config_id UUID"
             ))
