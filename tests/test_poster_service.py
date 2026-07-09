@@ -28,6 +28,8 @@ class FakeAsyncClient:
         self.post_response = post_response
         self.get_response = get_response
         self.post_payload = None
+        self.post_kwargs = None
+        self.post_url = None
         self.get_urls = []
 
     async def __aenter__(self):
@@ -36,8 +38,10 @@ class FakeAsyncClient:
     async def __aexit__(self, exc_type, exc, tb):
         return False
 
-    async def post(self, url, json, headers):
-        self.post_payload = json
+    async def post(self, url, **kwargs):
+        self.post_url = url
+        self.post_kwargs = kwargs
+        self.post_payload = kwargs.get("json") or kwargs.get("data")
         return self.post_response
 
     async def get(self, url, timeout=None):

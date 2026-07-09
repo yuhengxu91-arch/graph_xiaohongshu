@@ -1051,7 +1051,12 @@ class PosterService:
         if image_model_config:
             provider_type = image_model_config.get("provider_type")
             if provider_type == "openai_image":
-                return await self._call_openai_image_api(prompt, image_model_config)
+                return await self._call_openai_image_api(
+                    prompt,
+                    image_model_config,
+                    input_image_base64=input_image_base64,
+                    mask_image_base64=mask_image_base64,
+                )
             if provider_type == "gemini":
                 return await self._call_gemini_api(
                     prompt,
@@ -1072,13 +1077,18 @@ class PosterService:
         if effective == "doubao":
             return await self._call_doubao_image_api(prompt, input_image_base64)
         if effective == "gpt_image":
-            return await self._call_gpt_image_api(prompt)
+            return await self._call_gpt_image_api(prompt, input_image_base64, mask_image_base64)
         if effective == "gemini_ch":
             return await self._call_gemini_api(prompt, input_image_base64, mask_image_base64, use_changhuai=True)
         return await self._call_gemini_api(prompt, input_image_base64, mask_image_base64)
 
 
-    async def _call_gpt_image_api(self, prompt: str) -> Optional[str]:
+    async def _call_gpt_image_api(
+        self,
+        prompt: str,
+        input_image_base64: Optional[str] = None,
+        mask_image_base64: Optional[str] = None,
+    ) -> Optional[str]:
         """调用 GPT Image 2 生图 API（OpenAI 兼容，changhuai 渠道）"""
         return await self._call_openai_image_api(
             prompt,
@@ -1088,12 +1098,16 @@ class PosterService:
                 "model_name": self.gpt_image_model,
                 "name": "GPT Image",
             },
+            input_image_base64=input_image_base64,
+            mask_image_base64=mask_image_base64,
         )
 
     async def _call_openai_image_api(
         self,
         prompt: str,
         config: Dict[str, Any],
+        input_image_base64: Optional[str] = None,
+        mask_image_base64: Optional[str] = None,
     ) -> Optional[str]:
         """调用 OpenAI Images 兼容接口。"""
         api_key = config.get("api_key", "")
@@ -1105,24 +1119,36 @@ class PosterService:
             print(f"[PosterService] {tag} API Key 未配置")
             return None
 
-        url = f"{base_url}/v1/images/generations"
+        is_edit = bool(input_image_base64)
+        url = f"{base_url}/v1/images/{'edits' if is_edit else 'generations'}"
         print(f"[PosterService] {tag} 请求 URL: {url}")
         print(f"[PosterService] {tag} 使用模型: {model}")
 
-        payload = {
+        payload: Dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "n": 1,
             "size": "1024x1024",
         }
         headers = {
-            "Content-Type": "application/json",
             "Authorization": f"Bearer {api_key}",
         }
 
         try:
             async with httpx.AsyncClient(timeout=300.0) as client:
-                response = await client.post(url, json=payload, headers=headers)
+                if is_edit:
+                    files = {
+                        "image": self._openai_image_file_tuple(input_image_base64),
+                    }
+                    if mask_image_base64:
+                        files["mask"] = self._openai_image_file_tuple(mask_image_base64, filename="mask.png")
+                    response = await client.post(url, data=payload, files=files, headers=headers)
+                else:
+                    response = await client.post(
+                        url,
+                        json=payload,
+                        headers={**headers, "Content-Type": "application/json"},
+                    )
                 response.raise_for_status()
                 result = response.json()
                 data_list = result.get("data", [])
@@ -1143,6 +1169,20 @@ class PosterService:
         except Exception as e:
             print(f"[PosterService] {tag} 请求异常: {e}")
             return None
+
+    def _openai_image_file_tuple(self, image_base64: str, *, filename: str = "image.png") -> tuple[str, bytes, str]:
+        """将 data URL 或裸 base64 转为 OpenAI Images multipart 文件。"""
+        mime_type = "image/png"
+        encoded = image_base64
+
+        if image_base64.startswith("data:"):
+            header, _, data = image_base64.partition(",")
+            encoded = data
+            media = header.removeprefix("data:").split(";", 1)[0]
+            if media:
+                mime_type = media
+
+        return (filename, base64.b64decode(encoded), mime_type)
 
     async def _call_doubao_image_api(
         self, prompt: str,
