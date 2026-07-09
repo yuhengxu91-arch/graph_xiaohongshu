@@ -54,8 +54,39 @@ class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(client.post_url, "https://dynamic.example.test/v1/images/edits")
         self.assertEqual(client.post_payload["model"], "gpt-image-custom")
         self.assertEqual(client.post_payload["prompt"], "把日期改成 7月9日，其他保持一致")
-        self.assertIn("image", client.post_kwargs["files"])
+        self.assertIn("image", [name for name, _ in client.post_kwargs["files"]])
         self.assertNotEqual(client.post_kwargs["headers"].get("Content-Type"), "application/json")
+
+    async def test_dynamic_openai_image_config_sends_all_reference_images_to_edits_endpoint(self):
+        service = PosterService()
+        client = FakeAsyncClient(
+            post_response=FakeResponse({"data": [{"b64_json": "fused-image"}]}),
+        )
+        image_model_config = {
+            "provider_type": "openai_image",
+            "base_url": "https://dynamic.example.test",
+            "model_name": "gpt-image-custom",
+            "api_key": "dynamic-key",
+        }
+
+        from unittest.mock import patch
+
+        with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+            image = await service._call_ai_image_api(
+                "把图1和图2融合成一张海报",
+                input_images_base64=[
+                    "data:image/png;base64,aW1hZ2UtMQ==",
+                    "data:image/webp;base64,aW1hZ2UtMg==",
+                ],
+                image_model_config=image_model_config,
+            )
+
+        self.assertEqual(image, "fused-image")
+        self.assertEqual(client.post_url, "https://dynamic.example.test/v1/images/edits")
+        image_files = [file for name, file in client.post_kwargs["files"] if name == "image"]
+        self.assertEqual(len(image_files), 2)
+        self.assertEqual(image_files[0][2], "image/png")
+        self.assertEqual(image_files[1][2], "image/webp")
 
 
 class ImageModelApiTests(unittest.TestCase):

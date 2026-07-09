@@ -110,6 +110,27 @@
       @close="closeEditor"
       @saved="handleSaved"
     />
+
+    <!-- 确认弹窗 -->
+    <ConfirmModal
+      :is-open="confirmModal.isOpen"
+      :title="confirmModal.title"
+      :message="confirmModal.message"
+      :confirm-text="confirmModal.confirmText"
+      :cancel-text="confirmModal.cancelText"
+      :danger="confirmModal.danger"
+      @confirm="handleConfirm"
+      @cancel="handleCancelConfirm"
+    />
+
+    <!-- 消息提示 (Toast) -->
+    <Transition name="fade">
+      <div v-if="toastMessage" class="fixed top-8 right-8 z-[2001] p-4 rounded-xl shadow-lg shadow-black/5 border text-sm font-medium transition-all max-w-sm flex items-start gap-3"
+           :class="toastType === 'error' ? 'bg-red-50 text-red-600 border-red-200' : 'bg-green-50 text-green-700 border-green-200'">
+        <span class="text-lg leading-none mt-0.5">{{ toastType === 'error' ? '⚠️' : '✅' }}</span>
+        <span class="flex-1">{{ toastMessage }}</span>
+      </div>
+    </Transition>
   </div>
 </template>
 
@@ -118,6 +139,55 @@ import { ref, onMounted, watch } from 'vue'
 import { getPromptList, deletePrompt, publishPrompt } from './api'
 import PromptCard from './components/prompt/PromptCard.vue'
 import PromptEditor from './components/prompt/PromptEditor.vue'
+import ConfirmModal from './components/common/ConfirmModal.vue'
+
+// Toast State
+const toastMessage = ref('')
+const toastType = ref('success')
+
+function showToast(msg, type = 'success') {
+  toastMessage.value = msg
+  toastType.value = type
+  setTimeout(() => {
+    toastMessage.value = ''
+  }, 3000)
+}
+
+// Confirm Modal State
+const confirmModal = ref({
+  isOpen: false,
+  title: '确认操作',
+  message: '',
+  confirmText: '确定',
+  cancelText: '取消',
+  danger: false,
+  resolve: null
+})
+
+function showConfirm(options) {
+  return new Promise((resolve) => {
+    confirmModal.value = {
+      ...confirmModal.value,
+      ...options,
+      isOpen: true,
+      resolve
+    }
+  })
+}
+
+function handleConfirm() {
+  if (confirmModal.value.resolve) {
+    confirmModal.value.resolve(true)
+  }
+  confirmModal.value.isOpen = false
+}
+
+function handleCancelConfirm() {
+  if (confirmModal.value.resolve) {
+    confirmModal.value.resolve(false)
+  }
+  confirmModal.value.isOpen = false
+}
 
 // 状态
 const loading = ref(false)
@@ -185,23 +255,41 @@ const handleSaved = () => {
 }
 
 const handleDelete = async (id) => {
-  if (confirm('确定要删除这条提示词吗？')) {
+  const confirmed = await showConfirm({
+    title: '删除提示词',
+    message: '确定要删除这条提示词吗？此操作不可逆。',
+    confirmText: '确认删除',
+    cancelText: '取消',
+    danger: true
+  })
+  
+  if (confirmed) {
     try {
       await deletePrompt(id)
+      showToast('删除成功')
       fetchPrompts()
     } catch (e) {
-      alert('删除失败')
+      showToast('删除失败', 'error')
     }
   }
 }
 
 const handlePublish = async (id) => {
-  if (confirm('确定要发布到公共广场吗？其他人将可以看到并使用这条提示词。')) {
+  const confirmed = await showConfirm({
+    title: '发布共享',
+    message: '确定要发布到公共广场吗？其他人将可以看到并使用这条提示词。',
+    confirmText: '确认发布',
+    cancelText: '取消',
+    danger: false
+  })
+  
+  if (confirmed) {
     try {
       await publishPrompt(id)
+      showToast('成功发布到公共广场')
       fetchPrompts()
     } catch (e) {
-      alert('发布失败')
+      showToast('发布失败', 'error')
     }
   }
 }
@@ -217,5 +305,12 @@ const handlePublish = async (id) => {
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background-color: #cbd5e1;
   border-radius: 20px;
+}
+
+.fade-enter-active, .fade-leave-active {
+  transition: opacity 0.3s ease;
+}
+.fade-enter-from, .fade-leave-to {
+  opacity: 0;
 }
 </style>

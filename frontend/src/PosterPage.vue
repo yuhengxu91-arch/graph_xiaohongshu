@@ -419,6 +419,7 @@ function handleCustomGenerate(form) {
     style_tags: form.selectedStyles.length > 0 ? form.selectedStyles : undefined,
     aspect_ratio: form.aspectRatio,
     color_tone: form.colorTone || undefined,
+    reference_images: form.referenceImages?.length > 0 ? form.referenceImages : undefined,
   })
 }
 

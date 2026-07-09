@@ -138,6 +138,7 @@ class PosterService:
         style_tags: Optional[List[str]] = None,
         aspect_ratio: str = "3:4",
         color_tone: Optional[str] = None,
+        reference_images: Optional[List[Dict[str, Any]]] = None,
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
         brand_kit: Optional[Any] = None,
@@ -158,6 +159,15 @@ class PosterService:
         enhanced_prompt = self._build_custom_prompt(
             prompt, style_tags, aspect_ratio, color_tone, brand_kit=brand_kit
         )
+        reference_image_inputs = self._extract_reference_image_base64s(reference_images)
+        if reference_image_inputs:
+            enhanced_prompt += (
+                "\n\n【参考图片融合要求】\n"
+                f"- 用户上传了 {len(reference_image_inputs)} 张参考图片，请结合这些图片和文字提示一起创作。\n"
+                "- 参考图用于提取主体信息、风格、内容元素、构图关系、二维码或需要保留的视觉信息。\n"
+                "- 不要机械拼贴原图；应重新设计成一张完整、清晰、可发布的高质量海报。\n"
+                "- 当提示词提到“图1、图2、图3”等编号时，按上传顺序理解对应参考图。"
+            )
 
         # 2. 获取尺寸信息
         ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
@@ -166,6 +176,7 @@ class PosterService:
         print(f"[PosterService] 自定义生成: {prompt[:50]}...")
         image_base64 = await self._call_ai_image_api(
             enhanced_prompt,
+            input_images_base64=reference_image_inputs,
             provider_override=provider_override,
             image_model_config=image_model_config,
         )
@@ -390,12 +401,11 @@ class PosterService:
         if brand_kit:
             ai_prompt = self._inject_brand(ai_prompt, brand_kit)
 
-        input_image_base64 = None
+        input_images_base64 = self._extract_reference_image_base64s(reference_images)
+        input_image_base64 = input_images_base64[0] if input_images_base64 else None
         if reference_images:
-            first_reference = reference_images[0] or {}
-            input_image_base64 = first_reference.get("image_base64")
             if input_image_base64:
-                ai_prompt += "\n\n请参考上传图片的主体信息、构图关系或二维码内容进行创作。"
+                ai_prompt += f"\n\n请参考上传的 {len(input_images_base64)} 张图片的主体信息、构图关系或二维码内容进行创作。"
 
         # 6. 调用 AI 生成
         print(f"[PosterService] 个人模板生成 [{template_name}]: {params.get('title', '')}")
@@ -403,6 +413,7 @@ class PosterService:
         image_base64 = await self._call_ai_image_api(
             ai_prompt,
             input_image_base64=input_image_base64,
+            input_images_base64=input_images_base64,
             provider_override=provider_override,
             image_model_config=image_model_config,
         )
@@ -1040,6 +1051,7 @@ class PosterService:
     async def _call_ai_image_api(
         self, prompt: str,
         input_image_base64: Optional[str] = None,
+        input_images_base64: Optional[List[str]] = None,
         mask_image_base64: Optional[str] = None,
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
@@ -1048,26 +1060,31 @@ class PosterService:
         根据 IMAGE_PROVIDER 分派到对应的图片生成 API。
         返回 base64 编码的结果图片数据，失败返回 None。
         """
+        input_images = self._merge_input_images(input_image_base64, input_images_base64)
+        first_input_image = input_images[0] if input_images else None
+
         if image_model_config:
             provider_type = image_model_config.get("provider_type")
             if provider_type == "openai_image":
                 return await self._call_openai_image_api(
                     prompt,
                     image_model_config,
-                    input_image_base64=input_image_base64,
+                    input_image_base64=first_input_image,
+                    input_images_base64=input_images,
                     mask_image_base64=mask_image_base64,
                 )
             if provider_type == "gemini":
                 return await self._call_gemini_api(
                     prompt,
-                    input_image_base64,
+                    first_input_image,
                     mask_image_base64,
                     dynamic_config=image_model_config,
+                    input_images_base64=input_images,
                 )
             if provider_type == "doubao":
                 return await self._call_doubao_image_api(
                     prompt,
-                    input_image_base64,
+                    first_input_image,
                     dynamic_config=image_model_config,
                 )
             print(f"[PosterService] 未知动态图片模型类型: {provider_type}")
@@ -1075,12 +1092,12 @@ class PosterService:
 
         effective = self._get_effective_provider(provider_override)
         if effective == "doubao":
-            return await self._call_doubao_image_api(prompt, input_image_base64)
+            return await self._call_doubao_image_api(prompt, first_input_image)
         if effective == "gpt_image":
-            return await self._call_gpt_image_api(prompt, input_image_base64, mask_image_base64)
+            return await self._call_gpt_image_api(prompt, first_input_image, mask_image_base64, input_images_base64=input_images)
         if effective == "gemini_ch":
-            return await self._call_gemini_api(prompt, input_image_base64, mask_image_base64, use_changhuai=True)
-        return await self._call_gemini_api(prompt, input_image_base64, mask_image_base64)
+            return await self._call_gemini_api(prompt, first_input_image, mask_image_base64, use_changhuai=True, input_images_base64=input_images)
+        return await self._call_gemini_api(prompt, first_input_image, mask_image_base64, input_images_base64=input_images)
 
 
     async def _call_gpt_image_api(
@@ -1088,6 +1105,7 @@ class PosterService:
         prompt: str,
         input_image_base64: Optional[str] = None,
         mask_image_base64: Optional[str] = None,
+        input_images_base64: Optional[List[str]] = None,
     ) -> Optional[str]:
         """调用 GPT Image 2 生图 API（OpenAI 兼容，changhuai 渠道）"""
         return await self._call_openai_image_api(
@@ -1099,6 +1117,7 @@ class PosterService:
                 "name": "GPT Image",
             },
             input_image_base64=input_image_base64,
+            input_images_base64=input_images_base64,
             mask_image_base64=mask_image_base64,
         )
 
@@ -1107,6 +1126,7 @@ class PosterService:
         prompt: str,
         config: Dict[str, Any],
         input_image_base64: Optional[str] = None,
+        input_images_base64: Optional[List[str]] = None,
         mask_image_base64: Optional[str] = None,
     ) -> Optional[str]:
         """调用 OpenAI Images 兼容接口。"""
@@ -1119,7 +1139,8 @@ class PosterService:
             print(f"[PosterService] {tag} API Key 未配置")
             return None
 
-        is_edit = bool(input_image_base64)
+        input_images = self._merge_input_images(input_image_base64, input_images_base64)
+        is_edit = bool(input_images)
         url = f"{base_url}/v1/images/{'edits' if is_edit else 'generations'}"
         print(f"[PosterService] {tag} 请求 URL: {url}")
         print(f"[PosterService] {tag} 使用模型: {model}")
@@ -1137,11 +1158,15 @@ class PosterService:
         try:
             async with httpx.AsyncClient(timeout=300.0) as client:
                 if is_edit:
-                    files = {
-                        "image": self._openai_image_file_tuple(input_image_base64),
-                    }
+                    files: List[tuple[str, tuple[str, bytes, str]]] = [
+                        (
+                            "image",
+                            self._openai_image_file_tuple(image, filename=f"image_{index + 1}.png"),
+                        )
+                        for index, image in enumerate(input_images)
+                    ]
                     if mask_image_base64:
-                        files["mask"] = self._openai_image_file_tuple(mask_image_base64, filename="mask.png")
+                        files.append(("mask", self._openai_image_file_tuple(mask_image_base64, filename="mask.png")))
                     response = await client.post(url, data=payload, files=files, headers=headers)
                 else:
                     response = await client.post(
@@ -1183,6 +1208,39 @@ class PosterService:
                 mime_type = media
 
         return (filename, base64.b64decode(encoded), mime_type)
+
+    def _extract_reference_image_base64s(self, reference_images: Optional[List[Dict[str, Any]]]) -> List[str]:
+        """从前端参考图数组中提取可传给模型的图片数据，不设置业务张数上限。"""
+        images: List[str] = []
+        for item in reference_images or []:
+            if not isinstance(item, dict):
+                continue
+            image_data = item.get("image_base64") or item.get("data")
+            if isinstance(image_data, str) and image_data.strip():
+                images.append(image_data.strip())
+        return images
+
+    def _merge_input_images(
+        self,
+        input_image_base64: Optional[str],
+        input_images_base64: Optional[List[str]],
+    ) -> List[str]:
+        """兼容旧的单图参数和新的多图参数，保持调用方顺序。"""
+        images: List[str] = []
+        if input_image_base64:
+            images.append(input_image_base64)
+        for image in input_images_base64 or []:
+            if image and image not in images:
+                images.append(image)
+        return images
+
+    def _split_image_data_url(self, image_base64: str) -> tuple[str, str]:
+        """返回 (mime_type, base64_data)，兼容 data URL 和裸 base64。"""
+        if not image_base64.startswith("data:"):
+            return "image/png", image_base64
+        header, _, data = image_base64.partition(",")
+        media = header.removeprefix("data:").split(";", 1)[0] or "image/png"
+        return media, data
 
     async def _call_doubao_image_api(
         self, prompt: str,
@@ -1291,6 +1349,7 @@ class PosterService:
         mask_image_base64: Optional[str] = None,
         use_changhuai: bool = False,
         dynamic_config: Optional[Dict[str, Any]] = None,
+        input_images_base64: Optional[List[str]] = None,
     ) -> Optional[str]:
         """调用 Gemini 图片生成/编辑 API"""
         if dynamic_config:
@@ -1314,18 +1373,21 @@ class PosterService:
         print(f"[PosterService] {tag} 使用模型: {model}")
 
         parts = []
-        if input_image_base64:
+        input_images = self._merge_input_images(input_image_base64, input_images_base64)
+        for image in input_images:
+            mime_type, image_data = self._split_image_data_url(image)
             parts.append({
                 "inlineData": {
-                    "mimeType": "image/png",
-                    "data": input_image_base64,
+                    "mimeType": mime_type,
+                    "data": image_data,
                 }
             })
         if mask_image_base64:
+            mask_mime_type, mask_data = self._split_image_data_url(mask_image_base64)
             parts.append({
                 "inlineData": {
-                    "mimeType": "image/png",
-                    "data": mask_image_base64,
+                    "mimeType": mask_mime_type,
+                    "data": mask_data,
                 }
             })
         parts.append({"text": prompt})

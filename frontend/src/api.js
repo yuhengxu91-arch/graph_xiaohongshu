@@ -353,7 +353,7 @@ export function streamRejectArticle(threadId, feedback, callbacks) {
 
 /**
  * 自定义生成海报
- * @param {Object} data - { prompt, style_tags?, aspect_ratio?, color_tone? }
+ * @param {Object} data - { prompt, style_tags?, aspect_ratio?, color_tone?, reference_images? }
  */
 export async function generateCustomPoster(data) {
   const res = await api.post('/poster/generate/custom', data)

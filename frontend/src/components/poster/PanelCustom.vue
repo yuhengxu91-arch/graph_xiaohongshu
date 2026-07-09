@@ -38,6 +38,88 @@
           ></textarea>
         </div>
 
+        <!-- 参考图片上传 -->
+        <div class="space-y-4">
+          <div class="flex items-center justify-between gap-4">
+            <label class="text-sm font-bold text-slate-700 flex items-center gap-2">
+              <span class="text-blue-500">🖼️</span> 参考图片
+              <span class="text-xs text-slate-400 font-normal">（可选，可多张融合）</span>
+            </label>
+            <button
+              type="button"
+              class="text-xs px-3 py-1.5 bg-slate-100 text-slate-600 hover:bg-blue-50 hover:text-blue-600 rounded-lg font-medium transition-colors"
+              @click="triggerReferenceInput"
+            >
+              + 添加图片
+            </button>
+          </div>
+
+          <div
+            class="rounded-3xl border-2 border-dashed transition-all px-5 py-5"
+            :class="isDraggingReferences ? 'border-blue-500 bg-blue-50/70 shadow-lg shadow-blue-500/10' : 'border-slate-200 bg-slate-50/60 hover:border-blue-300'"
+            @dragover.prevent="isDraggingReferences = true"
+            @dragleave.prevent="isDraggingReferences = false"
+            @drop.prevent="handleReferenceDrop"
+          >
+            <input
+              ref="referenceInput"
+              type="file"
+              multiple
+              class="hidden"
+              accept="image/jpeg, image/png, image/webp"
+              @change="handleReferenceSelect"
+            />
+
+            <div v-if="form.referenceImages.length === 0" class="min-h-[150px] flex flex-col items-center justify-center text-center gap-3 cursor-pointer" @click="triggerReferenceInput">
+              <div class="w-14 h-14 bg-blue-50 rounded-2xl flex items-center justify-center text-2xl">☁️</div>
+              <div>
+                <p class="text-sm font-black text-slate-800">点击或拖拽图片到此处</p>
+                <p class="text-xs text-slate-400 mt-1">支持一次上传多张，提示词里可引用“图1 / 图2 / 图3”</p>
+              </div>
+            </div>
+
+            <div v-else class="space-y-4">
+              <div class="flex gap-3 overflow-x-auto pb-2 custom-scrollbar">
+                <div
+                  v-for="(image, index) in form.referenceImages"
+                  :key="image.id"
+                  class="relative shrink-0 w-36 rounded-2xl border border-slate-200 bg-white shadow-sm overflow-hidden"
+                >
+                  <div class="aspect-[4/3] bg-slate-100">
+                    <img :src="image.image_base64" class="w-full h-full object-cover" :alt="`参考图 ${index + 1}`" />
+                  </div>
+                  <div class="p-2 flex items-center justify-between gap-2">
+                    <span class="text-xs font-bold text-slate-700 truncate">图{{ index + 1 }}</span>
+                    <button
+                      type="button"
+                      class="w-7 h-7 rounded-lg bg-red-50 text-red-500 hover:bg-red-100 font-bold transition-colors"
+                      title="移除图片"
+                      @click="removeReferenceImage(image.id)"
+                    >
+                      ✕
+                    </button>
+                  </div>
+                </div>
+
+                <button
+                  type="button"
+                  class="shrink-0 w-36 rounded-2xl border-2 border-dashed border-slate-200 bg-white/70 hover:border-blue-300 hover:bg-blue-50/60 text-slate-500 hover:text-blue-600 transition-colors flex flex-col items-center justify-center gap-2"
+                  @click="triggerReferenceInput"
+                >
+                  <span class="text-2xl">+</span>
+                  <span class="text-xs font-bold">继续添加</span>
+                </button>
+              </div>
+
+              <p class="text-xs text-slate-400">
+                已添加 {{ form.referenceImages.length }} 张参考图。不会限制上传张数，实际可用数量由当前模型供应商决定。
+              </p>
+            </div>
+          </div>
+
+          <p v-if="referenceUploadError" class="text-xs font-semibold text-red-500">{{ referenceUploadError }}</p>
+        </div>
+
         <!-- 风格标签选择 -->
         <div class="space-y-4">
           <label class="text-sm font-bold text-slate-700 flex items-center gap-2">
@@ -178,6 +260,7 @@ const form = ref({
   selectedStyles: [],
   aspectRatio: '3:4',
   colorTone: '',
+  referenceImages: [],
 })
 
 const generatingPrompt = ref(false)
@@ -185,6 +268,9 @@ const generatedPrompt = ref(null)
 const promptMeta = ref({})
 const copied = ref(false)
 const consumedPrefillKey = ref(null)
+const referenceInput = ref(null)
+const isDraggingReferences = ref(false)
+const referenceUploadError = ref('')
 
 watch(() => props.prefill, (prefill) => {
   if (!prefill || prefill.mode !== 'custom') return
@@ -196,6 +282,7 @@ watch(() => props.prefill, (prefill) => {
     selectedStyles: Array.isArray(prefill.selected_styles) ? [...prefill.selected_styles] : [],
     aspectRatio: prefill.aspect_ratio || '3:4',
     colorTone: prefill.color_tone || '',
+    referenceImages: [],
   }
   generatedPrompt.value = null
   copied.value = false
@@ -213,7 +300,93 @@ function toggleStyle(name) {
 
 function handleGenerate() {
   if (!form.value.prompt.trim() || props.generating) return
-  emit('generate', { ...form.value })
+  emit('generate', {
+    ...form.value,
+    referenceImages: form.value.referenceImages.map((image, index) => ({
+      name: `图${index + 1}`,
+      image_base64: image.image_base64,
+    })),
+  })
+}
+
+function triggerReferenceInput() {
+  referenceInput.value?.click()
+}
+
+function removeReferenceImage(id) {
+  form.value.referenceImages = form.value.referenceImages.filter(image => image.id !== id)
+}
+
+async function handleReferenceSelect(event) {
+  await processReferenceFiles(event.target.files)
+  if (referenceInput.value) referenceInput.value.value = ''
+}
+
+async function handleReferenceDrop(event) {
+  isDraggingReferences.value = false
+  await processReferenceFiles(event.dataTransfer?.files)
+}
+
+async function processReferenceFiles(fileList) {
+  const files = Array.from(fileList || [])
+  if (files.length === 0) return
+
+  referenceUploadError.value = ''
+  const validFiles = []
+  for (const file of files) {
+    if (!['image/jpeg', 'image/png', 'image/webp'].includes(file.type)) {
+      referenceUploadError.value = '仅支持 JPG、PNG、WEBP 格式的图片'
+      continue
+    }
+    if (file.size > 10 * 1024 * 1024) {
+      referenceUploadError.value = '单张图片建议小于 10MB，过大的图片不会上传'
+      continue
+    }
+    validFiles.push(file)
+  }
+
+  if (validFiles.length === 0) return
+
+  try {
+    const compressed = await Promise.all(validFiles.map(file => compressImage(file, 1600, 0.82)))
+    const now = Date.now()
+    form.value.referenceImages.push(...compressed.map((image_base64, index) => ({
+      id: `${now}-${index}-${Math.random().toString(36).slice(2)}`,
+      image_base64,
+    })))
+  } catch (error) {
+    console.error('参考图片处理失败:', error)
+    referenceUploadError.value = '图片处理失败，请重试'
+  }
+}
+
+function compressImage(file, maxWidth = 1600, quality = 0.82) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader()
+    reader.readAsDataURL(file)
+    reader.onload = (event) => {
+      const img = new Image()
+      img.src = event.target.result
+      img.onload = () => {
+        let width = img.width
+        let height = img.height
+        if (width > maxWidth) {
+          height = Math.round((height * maxWidth) / width)
+          width = maxWidth
+        }
+        const canvas = document.createElement('canvas')
+        canvas.width = width
+        canvas.height = height
+        const ctx = canvas.getContext('2d')
+        ctx.fillStyle = '#FFFFFF'
+        ctx.fillRect(0, 0, width, height)
+        ctx.drawImage(img, 0, 0, width, height)
+        resolve(canvas.toDataURL('image/webp', quality))
+      }
+      img.onerror = (e) => reject(e)
+    }
+    reader.onerror = (e) => reject(e)
+  })
 }
 
 async function handleGeneratePrompt() {

@@ -162,6 +162,26 @@ class PosterServiceBrandKitTests(unittest.IsolatedAsyncioTestCase):
         service._save_image.assert_called_once()
         self.assertEqual(service._save_image.call_args.kwargs["brand_kit"], brand_kit)
 
+    async def test_generate_custom_passes_reference_images_to_image_api(self):
+        service = PosterService()
+        service._call_ai_image_api = AsyncMock(return_value=base64.b64encode(b"fake-png").decode("utf-8"))
+        service._save_image = MagicMock(return_value="/static/images/posters/fused.png")
+
+        result = await service.generate_custom(
+            prompt="把图1和图2融合成直播海报",
+            reference_images=[
+                {"name": "图1", "image_base64": "data:image/png;base64,aW1hZ2Ux"},
+                {"name": "图2", "image_base64": "data:image/webp;base64,aW1hZ2Uy"},
+            ],
+        )
+
+        self.assertTrue(result["success"])
+        self.assertIn("用户上传了 2 张参考图片", result["prompt_used"])
+        self.assertEqual(
+            service._call_ai_image_api.call_args.kwargs["input_images_base64"],
+            ["data:image/png;base64,aW1hZ2Ux", "data:image/webp;base64,aW1hZ2Uy"],
+        )
+
     async def test_db_template_generation_injects_brand_kit(self):
         service = PosterService()
         service._call_ai_image_api = AsyncMock(return_value=base64.b64encode(b"fake-png").decode("utf-8"))
@@ -244,6 +264,53 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
 
         brand_service_mock.get_brand_kit.assert_awaited_once()
         self.assertIs(generate_mock.call_args.kwargs["brand_kit"], brand_kit)
+
+    async def test_custom_generation_passes_reference_images_without_saving_base64_payload(self):
+        from app.api.v1 import poster as poster_api
+
+        response_payload = {
+            "success": True,
+            "image_url": "/static/images/posters/fused.png",
+            "prompt_used": "fused prompt",
+            "aspect_ratio": "3:4",
+            "width": 1080,
+            "height": 1440,
+            "mode": "custom",
+        }
+        saved_payloads = []
+
+        async def capture_generation_record(*args, **kwargs):
+            saved_payloads.append(kwargs["request_payload"])
+
+        request = poster_api.CustomGenerateRequest(
+            prompt="把图1和图2融合成直播海报",
+            reference_images=[
+                poster_api.ReferenceImageInput(name="图1", image_base64="data:image/png;base64,aW1hZ2Ux"),
+                poster_api.ReferenceImageInput(name="图2", image_base64="data:image/png;base64,aW1hZ2Uy"),
+            ],
+        )
+
+        with patch.object(poster_api.profile_service, "get_user_image_provider", AsyncMock(return_value=None)):
+            with patch.object(poster_api, "_get_user_image_model_config", AsyncMock(return_value=None)):
+                with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
+                    with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response_payload)) as generate_mock:
+                        with patch.object(poster_api.gallery_service, "create_generation_record", AsyncMock(side_effect=capture_generation_record)):
+                            await poster_api.generate_custom(
+                                request,
+                                current_user=SimpleNamespace(id=uuid4()),
+                                db=object(),
+                            )
+
+        self.assertEqual(len(generate_mock.call_args.kwargs["reference_images"]), 2)
+        self.assertEqual(
+            generate_mock.call_args.kwargs["reference_images"][0]["image_base64"],
+            "data:image/png;base64,aW1hZ2Ux",
+        )
+        self.assertEqual(
+            saved_payloads[0]["reference_images"],
+            [{"name": "图1", "has_image": True}, {"name": "图2", "has_image": True}],
+        )
+        self.assertNotIn("aW1hZ2Ux", str(saved_payloads[0]))
 
 
 if __name__ == "__main__":

@@ -23,12 +23,19 @@ router = APIRouter(prefix="/poster", tags=["Poster"])
 
 # ======================== 请求/响应模型 ========================
 
+class ReferenceImageInput(BaseModel):
+    """参考图片输入"""
+    image_base64: str = Field(..., description="参考图片的 base64 / data URL 数据")
+    name: Optional[str] = Field(None, description="参考图名称，如 图1")
+
+
 class CustomGenerateRequest(BaseModel):
     """自定义生成请求"""
     prompt: str = Field(..., description="用户输入的提示词", min_length=1, max_length=IMAGE_PROMPT_MAX_LENGTH)
     style_tags: Optional[List[str]] = Field(None, description="风格标签名称列表")
     aspect_ratio: str = Field("3:4", description="输出比例: 3:4 / 2.35:1 / 9:16 / 1:1 / 16:9")
     color_tone: Optional[str] = Field(None, description="色调偏好")
+    reference_images: Optional[List[ReferenceImageInput]] = Field(None, description="自定义生成参考图片列表")
 
 
 class TemplateGenerateRequest(BaseModel):
@@ -292,16 +299,23 @@ async def generate_custom(
             style_tags=req.style_tags,
             aspect_ratio=req.aspect_ratio,
             color_tone=req.color_tone,
+            reference_images=[image.model_dump() for image in (req.reference_images or [])],
             provider_override=provider,
             image_model_config=image_model_config,
             brand_kit=brand_kit,
         )
+        request_payload = req.model_dump()
+        if req.reference_images:
+            request_payload["reference_images"] = [
+                {"name": image.name or f"图{index + 1}", "has_image": True}
+                for index, image in enumerate(req.reference_images)
+            ]
         await _auto_save_generation(
             db=db,
             current_user=current_user,
             source_mode="custom",
             result=result,
-            request_payload=req.model_dump(),
+            request_payload=request_payload,
         )
         return GenerateResponse(**result)
     except Exception as e:
