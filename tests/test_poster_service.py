@@ -71,7 +71,80 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
 
         self.assertEqual(image, "nested-image")
         self.assertEqual(client.post_payload["response_format"], "b64_json")
+        self.assertEqual(client.post_payload["size"], "1536x2048")
         self.assertEqual(client.get_urls, [])
+
+    async def test_doubao_uses_selected_aspect_ratio_size(self):
+        service = PosterService()
+        client = FakeAsyncClient(
+            post_response=FakeResponse({"data": [{"b64_json": "portrait-image"}]}),
+        )
+
+        with patch.dict(os.environ, {"LLM_API_KEY": "test-key", "LLM_BASE_URL": "https://example.test/api/v3"}):
+            with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+                image = await service._call_doubao_image_api("生成一张海报", aspect_ratio="9:16")
+
+        self.assertEqual(image, "portrait-image")
+        self.assertEqual(client.post_payload["size"], "1024x1792")
+
+    async def test_call_ai_image_api_passes_aspect_ratio_to_openai_image(self):
+        service = PosterService()
+        client = FakeAsyncClient(
+            post_response=FakeResponse({"data": [{"b64_json": "third-party-image"}]}),
+        )
+        image_model_config = {
+            "provider_type": "openai_image",
+            "base_url": "https://third-party.example.test",
+            "model_name": "nano-banana-pro",
+            "api_key": "third-party-key",
+            "name": "第三方生图",
+        }
+
+        with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+            image = await service._call_ai_image_api(
+                "模板提示词",
+                image_model_config=image_model_config,
+                aspect_ratio="3:4",
+            )
+
+        self.assertEqual(image, "third-party-image")
+        self.assertEqual(client.post_payload["size"], "1536x2048")
+
+    async def test_call_ai_image_api_passes_aspect_ratio_to_doubao(self):
+        service = PosterService()
+        service.provider = "doubao"
+        client = FakeAsyncClient(
+            post_response=FakeResponse({"data": [{"b64_json": "template-image"}]}),
+        )
+
+        with patch.dict(os.environ, {"LLM_API_KEY": "test-key", "LLM_BASE_URL": "https://example.test/api/v3"}):
+            with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+                image = await service._call_ai_image_api(
+                    "模板提示词",
+                    aspect_ratio="3:4",
+                )
+
+        self.assertEqual(image, "template-image")
+        self.assertEqual(client.post_payload["size"], "1536x2048")
+
+    async def test_db_template_generation_passes_selected_aspect_ratio_to_image_api(self):
+        service = PosterService()
+
+        with patch.object(service, "_call_ai_image_api", AsyncMock(return_value=base64.b64encode(b"png").decode("utf-8"))) as call_mock:
+            with patch.object(service, "_save_image", return_value="/static/generated.png"):
+                result = await service.generate_from_db_template(
+                    template_config={"ai_prompt_template": "生成{title}海报", "default_aspect_ratio": "3:4"},
+                    template_name="喜报",
+                    template_style_tag=None,
+                    params={"title": "本科"},
+                    aspect_ratio="3:4",
+                )
+
+        self.assertTrue(result["success"])
+        self.assertEqual(result["aspect_ratio"], "3:4")
+        self.assertEqual(result["width"], 1080)
+        self.assertEqual(result["height"], 1440)
+        self.assertEqual(call_mock.await_args.kwargs["aspect_ratio"], "3:4")
 
     async def test_doubao_downloads_url_when_only_url_is_returned(self):
         service = PosterService()

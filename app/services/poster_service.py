@@ -19,11 +19,11 @@ load_dotenv()
 
 # ======================== 尺寸预设 ========================
 ASPECT_RATIOS: Dict[str, Dict[str, Any]] = {
-    "3:4":    {"width": 1080, "height": 1440, "label": "小红书"},
-    "2.35:1": {"width": 1080, "height": 460,  "label": "公众号"},
-    "9:16":   {"width": 1080, "height": 1920, "label": "抖音"},
-    "1:1":    {"width": 1080, "height": 1080, "label": "正方形"},
-    "16:9":   {"width": 1920, "height": 1080, "label": "横版"},
+    "3:4":    {"width": 1080, "height": 1440, "label": "小红书", "api_size": "1536x2048"},
+    "2.35:1": {"width": 1080, "height": 460,  "label": "公众号", "api_size": "1792x768"},
+    "9:16":   {"width": 1080, "height": 1920, "label": "抖音", "api_size": "1024x1792"},
+    "1:1":    {"width": 1080, "height": 1080, "label": "正方形", "api_size": "1024x1024"},
+    "16:9":   {"width": 1920, "height": 1080, "label": "横版", "api_size": "1792x1024"},
 }
 
 
@@ -130,6 +130,20 @@ class PosterService:
         """获取支持的尺寸比例"""
         return ASPECT_RATIOS
 
+    def _resolve_api_size(self, aspect_ratio: Optional[str] = None) -> str:
+        """将前端比例映射为图片 API 请求的像素尺寸。"""
+        ratio_info = ASPECT_RATIOS.get(aspect_ratio or "3:4", ASPECT_RATIOS["3:4"])
+        return ratio_info.get("api_size", "1024x1024")
+
+    def _build_gemini_generation_config(self, aspect_ratio: Optional[str] = None) -> Dict[str, Any]:
+        """构建 Gemini 生图 generationConfig，尽量通过 imageConfig 约束比例。"""
+        config: Dict[str, Any] = {"responseModalities": ["IMAGE", "TEXT"]}
+        ratio = aspect_ratio or "3:4"
+        supported = {"1:1", "2:3", "3:2", "3:4", "4:3", "4:5", "5:4", "9:16", "16:9", "21:9"}
+        if ratio in supported:
+            config["imageConfig"] = {"aspectRatio": ratio}
+        return config
+
     # ======================== 自定义生成 ========================
 
     async def generate_custom(
@@ -179,6 +193,7 @@ class PosterService:
             input_images_base64=reference_image_inputs,
             provider_override=provider_override,
             image_model_config=image_model_config,
+            aspect_ratio=aspect_ratio,
         )
 
         if not image_base64:
@@ -300,6 +315,7 @@ class PosterService:
             ai_prompt,
             provider_override=provider_override,
             image_model_config=image_model_config,
+            aspect_ratio=effective_ratio,
         )
 
         if not image_base64:
@@ -416,6 +432,7 @@ class PosterService:
             input_images_base64=input_images_base64,
             provider_override=provider_override,
             image_model_config=image_model_config,
+            aspect_ratio=effective_ratio,
         )
 
         if not image_base64:
@@ -470,6 +487,7 @@ class PosterService:
             enhanced_prompt, input_image_base64=image_base64,
             provider_override=provider_override,
             image_model_config=image_model_config,
+            aspect_ratio=aspect_ratio,
         )
 
         if not image_result_base64:
@@ -526,6 +544,7 @@ class PosterService:
             enhanced_prompt, input_image_base64=image_base64,
             provider_override=provider_override,
             image_model_config=image_model_config,
+            aspect_ratio=aspect_ratio,
         )
 
         if not image_result_base64:
@@ -581,6 +600,7 @@ class PosterService:
                 mask_image_base64=mask_base64,
                 provider_override=provider_override,
                 image_model_config=image_model_config,
+                aspect_ratio=aspect_ratio,
             )
 
             if not image_result:
@@ -686,6 +706,7 @@ class PosterService:
                 prompt, input_image_base64=image_base64,
                 provider_override=provider_override,
                 image_model_config=image_model_config,
+                aspect_ratio=target_ratio,
             )
 
             if not image_result:
@@ -1055,6 +1076,7 @@ class PosterService:
         mask_image_base64: Optional[str] = None,
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
+        aspect_ratio: Optional[str] = None,
     ) -> Optional[str]:
         """
         根据 IMAGE_PROVIDER 分派到对应的图片生成 API。
@@ -1072,6 +1094,7 @@ class PosterService:
                     input_image_base64=first_input_image,
                     input_images_base64=input_images,
                     mask_image_base64=mask_image_base64,
+                    aspect_ratio=aspect_ratio,
                 )
             if provider_type == "gemini":
                 return await self._call_gemini_api(
@@ -1080,24 +1103,49 @@ class PosterService:
                     mask_image_base64,
                     dynamic_config=image_model_config,
                     input_images_base64=input_images,
+                    aspect_ratio=aspect_ratio,
                 )
             if provider_type == "doubao":
                 return await self._call_doubao_image_api(
                     prompt,
                     first_input_image,
                     dynamic_config=image_model_config,
+                    aspect_ratio=aspect_ratio,
                 )
             print(f"[PosterService] 未知动态图片模型类型: {provider_type}")
             return None
 
         effective = self._get_effective_provider(provider_override)
         if effective == "doubao":
-            return await self._call_doubao_image_api(prompt, first_input_image)
+            return await self._call_doubao_image_api(
+                prompt,
+                first_input_image,
+                aspect_ratio=aspect_ratio,
+            )
         if effective == "gpt_image":
-            return await self._call_gpt_image_api(prompt, first_input_image, mask_image_base64, input_images_base64=input_images)
+            return await self._call_gpt_image_api(
+                prompt,
+                first_input_image,
+                mask_image_base64,
+                input_images_base64=input_images,
+                aspect_ratio=aspect_ratio,
+            )
         if effective == "gemini_ch":
-            return await self._call_gemini_api(prompt, first_input_image, mask_image_base64, use_changhuai=True, input_images_base64=input_images)
-        return await self._call_gemini_api(prompt, first_input_image, mask_image_base64, input_images_base64=input_images)
+            return await self._call_gemini_api(
+                prompt,
+                first_input_image,
+                mask_image_base64,
+                use_changhuai=True,
+                input_images_base64=input_images,
+                aspect_ratio=aspect_ratio,
+            )
+        return await self._call_gemini_api(
+            prompt,
+            first_input_image,
+            mask_image_base64,
+            input_images_base64=input_images,
+            aspect_ratio=aspect_ratio,
+        )
 
 
     async def _call_gpt_image_api(
@@ -1106,6 +1154,7 @@ class PosterService:
         input_image_base64: Optional[str] = None,
         mask_image_base64: Optional[str] = None,
         input_images_base64: Optional[List[str]] = None,
+        aspect_ratio: Optional[str] = None,
     ) -> Optional[str]:
         """调用 GPT Image 2 生图 API（OpenAI 兼容，changhuai 渠道）"""
         return await self._call_openai_image_api(
@@ -1119,6 +1168,7 @@ class PosterService:
             input_image_base64=input_image_base64,
             input_images_base64=input_images_base64,
             mask_image_base64=mask_image_base64,
+            aspect_ratio=aspect_ratio,
         )
 
     async def _call_openai_image_api(
@@ -1128,12 +1178,14 @@ class PosterService:
         input_image_base64: Optional[str] = None,
         input_images_base64: Optional[List[str]] = None,
         mask_image_base64: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
     ) -> Optional[str]:
         """调用 OpenAI Images 兼容接口。"""
         api_key = config.get("api_key", "")
         base_url = (config.get("base_url") or "").rstrip("/")
         model = config.get("model_name") or config.get("model") or "gpt-image-2"
         tag = config.get("name") or "OpenAI-Image"
+        size = self._resolve_api_size(aspect_ratio)
 
         if not api_key:
             print(f"[PosterService] {tag} API Key 未配置")
@@ -1144,12 +1196,13 @@ class PosterService:
         url = f"{base_url}/v1/images/{'edits' if is_edit else 'generations'}"
         print(f"[PosterService] {tag} 请求 URL: {url}")
         print(f"[PosterService] {tag} 使用模型: {model}")
+        print(f"[PosterService] {tag} 生图尺寸: {size} (aspect_ratio={aspect_ratio or '3:4'})")
 
         payload: Dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "n": 1,
-            "size": "1024x1024",
+            "size": size,
         }
         headers = {
             "Authorization": f"Bearer {api_key}",
@@ -1246,6 +1299,7 @@ class PosterService:
         self, prompt: str,
         input_image_base64: Optional[str] = None,
         dynamic_config: Optional[Dict[str, Any]] = None,
+        aspect_ratio: Optional[str] = None,
     ) -> Optional[str]:
         """
         调用火山方舟 doubao-seedream 图片生成 API。
@@ -1259,13 +1313,15 @@ class PosterService:
             print("[PosterService] LLM_API_KEY 未配置，无法使用 doubao 生图")
             return None
 
+        size = self._resolve_api_size(aspect_ratio)
         url = f"{llm_base_url}/images/generations"
         payload: Dict[str, Any] = {
             "model": model,
             "prompt": prompt,
             "response_format": "b64_json",
-            "size": "2048x2048",
+            "size": size,
         }
+        print(f"[PosterService] doubao 生图尺寸: {size} (aspect_ratio={aspect_ratio or '3:4'})")
 
         if input_image_base64:
             if not input_image_base64.startswith("data:"):
@@ -1350,6 +1406,7 @@ class PosterService:
         use_changhuai: bool = False,
         dynamic_config: Optional[Dict[str, Any]] = None,
         input_images_base64: Optional[List[str]] = None,
+        aspect_ratio: Optional[str] = None,
     ) -> Optional[str]:
         """调用 Gemini 图片生成/编辑 API"""
         if dynamic_config:
@@ -1371,6 +1428,7 @@ class PosterService:
         url = f"{base_url}/v1beta/models/{model}:generateContent"
         print(f"[PosterService] {tag} 请求 URL: {url}")
         print(f"[PosterService] {tag} 使用模型: {model}")
+        print(f"[PosterService] {tag} 生图比例: {aspect_ratio or '3:4'}")
 
         parts = []
         input_images = self._merge_input_images(input_image_base64, input_images_base64)
@@ -1394,7 +1452,7 @@ class PosterService:
 
         payload = {
             "contents": [{"parts": parts}],
-            "generationConfig": {"responseModalities": ["IMAGE", "TEXT"]},
+            "generationConfig": self._build_gemini_generation_config(aspect_ratio),
         }
         headers = {
             "Content-Type": "application/json",
