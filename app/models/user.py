@@ -18,6 +18,7 @@ class User(Base):
     username = Column(String(50), unique=True, nullable=False, index=True)
     password_hash = Column(String(255), nullable=False)
     is_admin = Column(Boolean, default=False, nullable=False, comment="是否为后台管理员")
+    is_active = Column(Boolean, default=True, nullable=False, comment="账号是否启用")
 
     # ========== 个人资料扩展 ==========
     avatar_url = Column(String(500), nullable=True, comment="头像 URL")

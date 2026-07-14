@@ -66,10 +66,51 @@ async def init_db() -> None:
                 "ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"
             ))
             await conn.execute(text(
+                "ALTER TABLE users "
+                "ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"
+            ))
+            await _bootstrap_admin_role(conn)
+            await conn.execute(text(
                 "ALTER TABLE user_preferences "
                 "ADD COLUMN IF NOT EXISTS image_model_config_id UUID"
             ))
     print("[DB] Database initialized")
+
+
+async def _bootstrap_admin_role(conn) -> None:
+    """仅在升级后没有启用管理员时，将旧系统管理员规则持久化一次。"""
+    active_admin = await conn.scalar(text(
+        "SELECT id FROM users "
+        "WHERE is_admin = TRUE AND is_active = TRUE LIMIT 1"
+    ))
+    if active_admin is not None:
+        return
+
+    configured = [
+        name.strip()
+        for name in settings.admin_usernames.split(",")
+        if name.strip()
+    ]
+    candidate_id = None
+    if configured:
+        placeholders = ", ".join(f":username_{index}" for index in range(len(configured)))
+        params = {f"username_{index}": username for index, username in enumerate(configured)}
+        candidate_id = await conn.scalar(text(
+            "SELECT id FROM users "
+            f"WHERE is_active = TRUE AND username IN ({placeholders}) "
+            "ORDER BY created_at ASC LIMIT 1"
+        ), params)
+
+    if candidate_id is None:
+        candidate_id = await conn.scalar(text(
+            "SELECT id FROM users WHERE is_active = TRUE "
+            "ORDER BY created_at ASC LIMIT 1"
+        ))
+    if candidate_id is not None:
+        await conn.execute(
+            text("UPDATE users SET is_admin = TRUE WHERE id = :user_id"),
+            {"user_id": candidate_id},
+        )
 
 
 async def close_db() -> None:

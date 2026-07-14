@@ -16,6 +16,15 @@ from app.models.user import User
 security = HTTPBearer()
 
 
+def _ensure_active(user: User) -> User:
+    if not bool(getattr(user, "is_active", True)):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="账号已停用，请联系管理员",
+        )
+    return user
+
+
 async def get_current_user(
     credentials: HTTPAuthorizationCredentials = Depends(security),
     db: AsyncSession = Depends(get_async_session)
@@ -62,7 +71,7 @@ async def get_current_user(
     if user is None:
         raise credentials_exception
     
-    return user
+    return _ensure_active(user)
 
 
 async def get_current_user_optional(
@@ -91,4 +100,7 @@ async def get_current_user_optional(
     result = await db.execute(
         select(User).where(User.id == user_id)
     )
-    return result.scalar_one_or_none()
+    user = result.scalar_one_or_none()
+    if user is None:
+        return None
+    return _ensure_active(user)
