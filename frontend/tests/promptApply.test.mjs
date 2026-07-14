@@ -160,3 +160,19 @@ test('poster page consumes a prompt application without starting generation', as
   assert.match(helper, /prompt: payload\.content/)
   assert.doesNotMatch(helper, /handleGenerate|generateCustomPoster|apiMethodMap/)
 })
+
+test('workflow page consumes a prompt application without starting workflow', async () => {
+  const source = await readFile(
+    new URL('../src/WorkflowPage.vue', import.meta.url),
+    'utf8',
+  )
+  const helper = source.match(/function consumePromptApplication\(\) \{[\s\S]*?\n\}/)?.[0] || ''
+
+  assert.match(source, /consumePromptApplyPayload/)
+  assert.match(source, /consumePromptApplication\(\)/)
+  assert.match(helper, /consumePromptApplyPayload\(sessionStorage, 'workflow'\)/)
+  assert.match(helper, /resetWorkflow\(\)/)
+  assert.match(helper, /currentStep\.value = 0/)
+  assert.match(helper, /topicDirection\.value = payload\.content/)
+  assert.doesNotMatch(helper, /handleStart|startWithParams|streamStartWorkflow/)
+})

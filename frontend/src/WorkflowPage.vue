@@ -261,6 +261,7 @@ import {
   getAllThreads,
   deleteThread
 } from './api.js'
+import { consumePromptApplyPayload } from './utils/promptApply.js'
 
 const emit = defineEmits([
   'new-workflow',
@@ -619,6 +620,7 @@ async function handleHistoryDelete(targetThreadId) {
 // 初始加载
 onMounted(() => {
   fetchThreadList()
+  consumePromptApplication()
 })
 
 // 暴露给外部的方法
@@ -638,6 +640,15 @@ function resetWorkflow() {
   nodeMetrics.value = []
   message.value = ''
   streamLogs.value = []
+}
+
+function consumePromptApplication() {
+  const payload = consumePromptApplyPayload(sessionStorage, 'workflow')
+  if (!payload) return
+
+  resetWorkflow()
+  currentStep.value = 0
+  topicDirection.value = payload.content
 }
 
 function determineCurrentStep(state) {
