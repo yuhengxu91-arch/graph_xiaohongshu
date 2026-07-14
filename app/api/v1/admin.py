@@ -96,11 +96,13 @@ async def list_users(
     role: Literal["all", "admin", "user"] = "all",
     user_status: Literal["all", "active", "inactive"] = Query("all", alias="status"),
     page: int = Query(1, ge=1),
-    page_size: Literal[20, 50, 100] = 20,
+    page_size: int = Query(20),
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ) -> AdminUserPageResponse:
     await _ensure_admin(db, current_user)
+    if page_size not in {20, 50, 100}:
+        raise HTTPException(status_code=422, detail="page_size 仅支持 20、50 或 100")
     result = await user_admin_service.list_users(
         db, keyword=keyword, role=role, status=user_status, page=page, page_size=page_size,
     )

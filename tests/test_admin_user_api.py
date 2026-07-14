@@ -5,6 +5,8 @@ from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
 from fastapi import HTTPException
+from fastapi import FastAPI
+from fastapi.testclient import TestClient
 
 
 class AdminUserApiTests(unittest.IsolatedAsyncioTestCase):
@@ -129,6 +131,28 @@ class AdminUserApiTests(unittest.IsolatedAsyncioTestCase):
 
         reset_mock.assert_awaited_once()
         self.assertIsNone(result)
+
+    async def test_page_size_query_string_is_accepted(self):
+        from app.api.v1 import admin as admin_api
+        from app.core.db import get_async_session
+        from app.dependencies.auth import get_current_user
+
+        app = FastAPI()
+        app.include_router(admin_api.router, prefix="/api/v1")
+        app.dependency_overrides[get_current_user] = lambda: SimpleNamespace(
+            id=uuid4(), username="admin", is_admin=True, is_active=True,
+        )
+        app.dependency_overrides[get_async_session] = lambda: object()
+        empty_page = SimpleNamespace(items=[], total=0)
+
+        with patch.object(admin_api.admin_service, "is_admin", AsyncMock(return_value=True)):
+            with patch.object(admin_api.user_admin_service, "list_users", AsyncMock(return_value=empty_page)):
+                response = TestClient(app).get("/api/v1/admin/users?page_size=20")
+                invalid_response = TestClient(app).get("/api/v1/admin/users?page_size=30")
+
+        self.assertEqual(response.status_code, 200, response.text)
+        self.assertEqual(response.json()["page_size"], 20)
+        self.assertEqual(invalid_response.status_code, 422)
 
 
 if __name__ == "__main__":
