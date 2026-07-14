@@ -6,6 +6,7 @@ from typing import Literal, Optional
 from uuid import UUID
 
 from sqlalchemy import asc, func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.security import get_password_hash
@@ -82,7 +83,10 @@ class UserAdminService:
             is_active=True,
         )
         db.add(user)
-        await db.flush()
+        try:
+            await db.flush()
+        except IntegrityError as error:
+            raise UsernameExistsError from error
         return user
 
     async def _lock_active_admins(self, db: AsyncSession) -> list[User]:

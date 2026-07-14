@@ -47,7 +47,9 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   response => response,
   error => {
-    if (error.response?.status === 401) {
+    const inactiveAccount = error.response?.status === 403
+      && error.response?.data?.detail === '账号已停用，请联系管理员'
+    if (error.response?.status === 401 || inactiveAccount) {
       removeToken()
       // 触发自定义事件通知前端需要登录
       window.dispatchEvent(new CustomEvent('auth:logout'))
@@ -55,12 +57,6 @@ api.interceptors.response.use(
     return Promise.reject(error)
   }
 )
-
-// 用户注册
-export async function register(username, password) {
-  const res = await api.post('/auth/register', { username, password })
-  return res.data
-}
 
 // 用户登录
 export async function login(username, password) {
@@ -703,14 +699,28 @@ export async function restorePublicTemplate(id) {
 
 // ============== 后台人员管理 API ==============
 
-export async function getAdminUsers() {
-  const res = await api.get('/admin/users')
+export async function getAdminUsers(params = {}) {
+  const res = await api.get('/admin/users', { params })
+  return res.data
+}
+
+export async function createAdminUser(data) {
+  const res = await api.post('/admin/users', data)
   return res.data
 }
 
 export async function setAdminUserRole(userId, isAdmin) {
   const res = await api.put(`/admin/users/${userId}/admin`, { is_admin: isAdmin })
   return res.data
+}
+
+export async function setAdminUserStatus(userId, isActive) {
+  const res = await api.put(`/admin/users/${userId}/status`, { is_active: isActive })
+  return res.data
+}
+
+export async function resetAdminUserPassword(userId, password) {
+  await api.put(`/admin/users/${userId}/password`, { password })
 }
 
 // ============== 个人中心 API (Profile) ==============

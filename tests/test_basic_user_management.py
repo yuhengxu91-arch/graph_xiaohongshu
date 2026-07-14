@@ -1,4 +1,5 @@
 import unittest
+import inspect
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
@@ -84,6 +85,21 @@ class BasicUserManagementTests(unittest.IsolatedAsyncioTestCase):
         from app.models.user import User
 
         self.assertIn("is_active", User.__table__.columns)
+
+    def test_startup_migration_persists_legacy_admin_and_active_flag(self):
+        from app.core import db
+
+        source = inspect.getsource(db)
+        self.assertIn("ADD COLUMN IF NOT EXISTS is_active", source)
+        self.assertIn("_bootstrap_admin_role", source)
+        self.assertIn("UPDATE users SET is_admin = TRUE", source)
+
+    def test_create_admin_password_is_interactive_not_a_command_argument(self):
+        from scripts import create_admin
+
+        source = inspect.getsource(create_admin)
+        self.assertIn("getpass.getpass", source)
+        self.assertNotIn('add_argument("password"', source)
 
     async def test_last_active_admin_cannot_be_demoted(self):
         service = UserAdminService()

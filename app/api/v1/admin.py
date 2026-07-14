@@ -7,7 +7,7 @@ from typing import Literal, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_async_session
@@ -44,6 +44,14 @@ class CreateUserRequest(BaseModel):
     username: str = Field(..., min_length=3, max_length=50)
     password: str = Field(..., min_length=6, max_length=100)
     is_admin: bool = False
+
+    @field_validator("username")
+    @classmethod
+    def normalize_username(cls, value: str) -> str:
+        value = value.strip()
+        if len(value) < 3:
+            raise ValueError("用户名长度必须为 3 至 50 个字符")
+        return value
 
 
 class SetUserAdminRequest(BaseModel):

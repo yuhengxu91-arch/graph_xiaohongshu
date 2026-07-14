@@ -18,10 +18,8 @@
       <!-- Login Card -->
       <div class="w-full bg-white rounded-xl shadow-xl shadow-slate-200/50 border border-slate-100 p-8">
         <div class="mb-8">
-          <h2 class="text-2xl font-bold text-slate-900">{{ isLoginMode ? '欢迎回来' : '注册新账号' }}</h2>
-          <p class="text-slate-500 mt-2">
-            {{ isLoginMode ? '请登录您的账号以继续管理内容' : '创建一个账号开启智能运营体验' }}
-          </p>
+          <h2 class="text-2xl font-bold text-slate-900">欢迎回来</h2>
+          <p class="text-slate-500 mt-2">请登录您的账号以继续管理内容</p>
         </div>
 
         <form class="space-y-5" @submit.prevent="handleAuth">
@@ -46,7 +44,7 @@
           <div class="flex flex-col gap-2">
             <div class="flex justify-between items-center">
               <label class="text-sm font-semibold text-slate-700" for="password">密码</label>
-              <a v-if="isLoginMode" class="text-sm font-medium text-blue-600 hover:underline cursor-pointer">忘记密码？</a>
+              <span class="text-xs text-slate-400">账号由管理员创建</span>
             </div>
             <div class="relative">
               <span class="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400">🔒</span>
@@ -73,7 +71,7 @@
             class="w-full bg-blue-600 hover:bg-blue-700 text-white font-bold py-3.5 rounded-xl shadow-lg shadow-blue-600/20 transition-all flex items-center justify-center gap-2 group disabled:opacity-70 disabled:cursor-not-allowed mt-2"
             :disabled="authLoading"
           >
-            <span>{{ authLoading ? '处理中...' : (isLoginMode ? '立即登录' : '同意协议并注册') }}</span>
+            <span>{{ authLoading ? '登录中...' : '立即登录' }}</span>
             <span v-if="!authLoading" class="group-hover:translate-x-1 transition-transform">→</span>
           </button>
         </form>
@@ -82,24 +80,17 @@
 
       </div>
 
-      <!-- Footer Link -->
-      <p class="mt-8 text-slate-600 text-sm">
-        {{ isLoginMode ? '还没有账号？' : '已有账号？' }}
-        <a class="text-blue-600 font-bold hover:underline ml-1 cursor-pointer" @click.prevent="isLoginMode = !isLoginMode">
-          {{ isLoginMode ? '立即注册' : '返回登录' }}
-        </a>
-      </p>
+      <p class="mt-8 text-slate-500 text-sm">如需账号或重置密码，请联系管理员</p>
     </div>
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
-import { login, register, getCurrentUser } from '../../api.js'
+import { login, getCurrentUser } from '../../api.js'
 
 const emit = defineEmits(['login-success'])
 
-const isLoginMode = ref(true)
 const authLoading = ref(false)
 const authError = ref('')
 const authForm = ref({
@@ -112,15 +103,7 @@ async function handleAuth() {
   authLoading.value = true
   
   try {
-    if (isLoginMode.value) {
-      // 登录
-      await login(authForm.value.username, authForm.value.password)
-    } else {
-      // 注册
-      await register(authForm.value.username, authForm.value.password)
-      // 注册成功后自动登录
-      await login(authForm.value.username, authForm.value.password)
-    }
+    await login(authForm.value.username, authForm.value.password)
     const user = await getCurrentUser()
     emit('login-success', user.username)
   } catch (e) {
