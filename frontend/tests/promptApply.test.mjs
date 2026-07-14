@@ -143,3 +143,20 @@ test('prompt library binds apply state and routes supported categories', async (
   assert.match(source, /提示词内容为空/)
   assert.match(source, /void usePrompt\(prompt\.id\)/)
 })
+
+test('poster page consumes a prompt application without starting generation', async () => {
+  const source = await readFile(
+    new URL('../src/PosterPage.vue', import.meta.url),
+    'utf8',
+  )
+  const helper = source.match(/function consumePromptApplication\(\) \{[\s\S]*?\n\}/)?.[0] || ''
+
+  assert.match(source, /consumePromptApplyPayload/)
+  assert.match(source, /consumePromptApplication\(\)/)
+  assert.match(helper, /consumePromptApplyPayload\(sessionStorage, 'poster'\)/)
+  assert.match(helper, /activeTab\.value = 'custom'/)
+  assert.match(helper, /generatedResult\.value = null/)
+  assert.match(helper, /mode: 'custom'/)
+  assert.match(helper, /prompt: payload\.content/)
+  assert.doesNotMatch(helper, /handleGenerate|generateCustomPoster|apiMethodMap/)
+})

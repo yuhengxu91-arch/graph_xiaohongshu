@@ -102,6 +102,7 @@ import {
   consumePosterRemixPayload,
   resolvePosterRemixTarget,
 } from './utils/posterRemix.js'
+import { consumePromptApplyPayload } from './utils/promptApply.js'
 
 const route = useRoute()
 
@@ -227,6 +228,7 @@ onMounted(async () => {
     loadImageModelContext(),
   ])
   consumeRemixWork()
+  consumePromptApplication()
 })
 
 function switchTab(tabId) {
@@ -243,6 +245,19 @@ function consumeRemixWork() {
   activeTab.value = target.tab
   generatedResult.value = null
   panelPrefill.value = target.prefill
+}
+
+function consumePromptApplication() {
+  const payload = consumePromptApplyPayload(sessionStorage, 'poster')
+  if (!payload) return
+
+  activeTab.value = 'custom'
+  generatedResult.value = null
+  panelPrefill.value = {
+    mode: 'custom',
+    remix_key: `prompt:${payload.prompt_id}:${payload.created_at}`,
+    prompt: payload.content,
+  }
 }
 
 // ============== 本地缓存工具函数 ==============
