@@ -67,11 +67,13 @@
           <span>🔄</span> {{ prompt.use_count || 0 }}
         </span>
       </div>
-      <button 
+      <button
+        v-if="canApply"
         @click="$emit('use', prompt)"
-        class="text-blue-600 font-medium hover:text-blue-700 hover:underline flex items-center gap-1"
+        :disabled="applying || applyDisabled"
+        class="text-blue-600 font-medium hover:text-blue-700 hover:underline flex items-center gap-1 disabled:text-slate-400 disabled:no-underline disabled:cursor-not-allowed"
       >
-        <span>应用</span>
+        <span>{{ applying ? '应用中' : '应用' }}</span>
         <span>→</span>
       </button>
     </div>
@@ -79,19 +81,23 @@
 </template>
 
 <script setup>
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
+import { APPLICABLE_PROMPT_CATEGORIES } from '../../utils/promptApply.js'
 
 const props = defineProps({
   prompt: {
     type: Object,
     required: true
-  }
+  },
+  applying: Boolean,
+  applyDisabled: Boolean
 })
 
 const emit = defineEmits(['edit', 'delete', 'publish', 'use'])
 
 const showMenu = ref(false)
 const copied = ref(false)
+const canApply = computed(() => APPLICABLE_PROMPT_CATEGORIES.includes(props.prompt.category))
 
 const closeMenuDelay = () => {
   setTimeout(() => {

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import {
@@ -106,4 +107,39 @@ test('prompt apply payload can be cleared after a failed navigation', () => {
   clearPromptApplyPayload(storage)
 
   assert.equal(storage.getItem(PROMPT_APPLY_STORAGE_KEY), null)
+})
+
+test('prompt cards only expose apply for supported categories and show pending state', async () => {
+  const source = await readFile(
+    new URL('../src/components/prompt/PromptCard.vue', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(source, /APPLICABLE_PROMPT_CATEGORIES/)
+  assert.match(source, /v-if="canApply"/)
+  assert.match(source, /applying:\s*Boolean/)
+  assert.match(source, /applyDisabled:\s*Boolean/)
+  assert.match(source, /应用中/)
+  assert.match(source, /:disabled="applying \|\| applyDisabled"/)
+})
+
+test('prompt library binds apply state and routes supported categories', async () => {
+  const source = await readFile(
+    new URL('../src/PromptLibraryPage.vue', import.meta.url),
+    'utf8',
+  )
+
+  assert.match(source, /@use="handleApply"/)
+  assert.match(source, /:applying="applyingPromptId === prompt\.id"/)
+  assert.match(source, /:apply-disabled="Boolean\(applyingPromptId\)"/)
+  assert.match(source, /useRouter/)
+  assert.match(source, /isNavigationFailure/)
+  assert.match(source, /savePromptApplyPayload/)
+  assert.match(source, /clearPromptApplyPayload/)
+  assert.match(source, /usePrompt/)
+  assert.match(source, /name:\s*'poster'/)
+  assert.match(source, /tab:\s*'custom'/)
+  assert.match(source, /name:\s*'workflow'/)
+  assert.match(source, /提示词内容为空/)
+  assert.match(source, /void usePrompt\(prompt\.id\)/)
 })

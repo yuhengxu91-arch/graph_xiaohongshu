@@ -96,9 +96,12 @@
           v-for="prompt in prompts" 
           :key="prompt.id" 
           :prompt="prompt"
+          :applying="applyingPromptId === prompt.id"
+          :apply-disabled="Boolean(applyingPromptId)"
           @edit="openEditor(prompt)"
           @delete="handleDelete"
           @publish="handlePublish"
+          @use="handleApply"
         />
       </div>
     </div>
@@ -136,10 +139,18 @@
 
 <script setup>
 import { ref, onMounted, watch } from 'vue'
-import { getPromptList, deletePrompt, publishPrompt } from './api'
+import { isNavigationFailure, useRouter } from 'vue-router'
+import { getPromptList, deletePrompt, publishPrompt, usePrompt } from './api'
 import PromptCard from './components/prompt/PromptCard.vue'
 import PromptEditor from './components/prompt/PromptEditor.vue'
 import ConfirmModal from './components/common/ConfirmModal.vue'
+import {
+  APPLICABLE_PROMPT_CATEGORIES,
+  clearPromptApplyPayload,
+  savePromptApplyPayload
+} from './utils/promptApply.js'
+
+const router = useRouter()
 
 // Toast State
 const toastMessage = ref('')
@@ -195,6 +206,7 @@ const prompts = ref([])
 const activeCategory = ref('all')
 const activeScope = ref('mine')
 const searchKeyword = ref('')
+const applyingPromptId = ref('')
 
 const showEditor = ref(false)
 const editingPrompt = ref(null)
@@ -291,6 +303,42 @@ const handlePublish = async (id) => {
     } catch (e) {
       showToast('发布失败', 'error')
     }
+  }
+}
+
+const handleApply = async (prompt) => {
+  if (applyingPromptId.value || !APPLICABLE_PROMPT_CATEGORIES.includes(prompt.category)) return
+
+  const content = prompt.content?.trim()
+  if (!content) {
+    showToast('提示词内容为空', 'error')
+    return
+  }
+
+  applyingPromptId.value = prompt.id
+  try {
+    savePromptApplyPayload(sessionStorage, {
+      prompt_id: prompt.id,
+      category: prompt.category,
+      content,
+      created_at: Date.now()
+    })
+
+    const target = prompt.category === 'poster'
+      ? { name: 'poster', query: { tab: 'custom' } }
+      : { name: 'workflow' }
+    const navigationFailure = await router.push(target)
+    if (isNavigationFailure(navigationFailure)) throw navigationFailure
+
+    void usePrompt(prompt.id).catch((error) => {
+      console.warn('记录提示词使用次数失败:', error)
+    })
+  } catch (error) {
+    clearPromptApplyPayload(sessionStorage)
+    console.error('应用提示词失败:', error)
+    showToast('应用失败，请重试', 'error')
+  } finally {
+    applyingPromptId.value = ''
   }
 }
 </script>
