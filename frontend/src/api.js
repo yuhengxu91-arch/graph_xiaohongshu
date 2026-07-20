@@ -348,12 +348,12 @@ export function streamRejectArticle(threadId, feedback, callbacks) {
 // ============== 海报生成 API ==============
 
 /**
- * 自定义生成海报
+ * 自定义生成海报（提交后台任务，避免长时间同步请求误判超时）
  * @param {Object} data - { prompt, style_tags?, aspect_ratio?, color_tone?, reference_images? }
  */
 export async function generateCustomPoster(data) {
-  const res = await api.post('/poster/generate/custom', data)
-  return res.data
+  const res = await api.post('/poster/batch/single/custom', data)
+  return { ...res.data, mode: 'batch', display_mode: 'single', single_label: '自定义创意' }
 }
 
 /**
@@ -410,12 +410,12 @@ export async function getPosterAspectRatios() {
 }
 
 /**
- * 以图改图
+ * 以图改图（提交后台任务，避免长时间同步请求误判超时）
  * @param {Object} data - { image_base64, edit_prompt, aspect_ratio? }
  */
 export async function generateEditPoster(data) {
-  const res = await api.post('/poster/generate/edit', data)
-  return res.data
+  const res = await api.post('/poster/batch/single/edit', data)
+  return { ...res.data, mode: 'batch', display_mode: 'single', single_label: '智能改图' }
 }
 
 /**

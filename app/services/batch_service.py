@@ -109,6 +109,177 @@ class BatchService:
             "should_start_worker": should_start_worker,
         }
 
+    async def create_single_generation_task(
+        self,
+        *,
+        mode: str,
+        params: Dict[str, Any],
+        runtime_input: Dict[str, Any],
+        shared_config: Dict[str, Any],
+        user_id: Optional[UUID] = None,
+    ) -> Dict[str, Any]:
+        """
+        创建单张异步生成任务（自定义 / 以图改图等）。
+
+        与批量任务复用同一套内存任务表和状态查询，但：
+        - 只有 1 个子任务
+        - 大体积输入（原图、参考图 base64）放在内存字段 ``runtime_input``，不写入数据库
+        - 通过 ``single_mode`` 分派到对应的 poster_service 高级方法
+        """
+        task_id = str(uuid.uuid4())
+        item = {
+            "id": str(uuid.uuid4()),
+            "order_index": 0,
+            "item_params": params,
+            "runtime_input": runtime_input,
+            "status": "pending",
+            "image_url": None,
+            "ai_prompt_used": None,
+            "error_message": None,
+            "retry_count": 0,
+            "started_at": None,
+            "completed_at": None,
+        }
+        task = {
+            "id": task_id,
+            "user_id": str(user_id) if user_id else None,
+            "status": "pending",
+            "total_count": 1,
+            "success_count": 0,
+            "failed_count": 0,
+            "running_count": 0,
+            "shared_config": shared_config,
+            "single_mode": mode,
+            "items": [item],
+            "created_at": datetime.utcnow().isoformat(),
+            "started_at": None,
+            "completed_at": None,
+            "series_style_anchor": None,
+            "worker_running": False,
+        }
+
+        _tasks[task_id] = task
+        await self._persist_task_create(task, user_id=user_id)
+
+        return {
+            "success": True,
+            "task_id": task_id,
+            "total_count": 1,
+            "mode": "batch",
+        }
+
+    async def run_single_generation_task(self, task_id: str) -> None:
+        """执行单张异步生成任务。"""
+        task = _tasks.get(task_id)
+        if not task:
+            return
+        if task.get("worker_running"):
+            return
+
+        task["worker_running"] = True
+        task["status"] = "running"
+        task["started_at"] = datetime.utcnow().isoformat()
+        await self._sync_task_state(task, sync_all_items=False)
+
+        try:
+            item = task["items"][0]
+            await self._generate_single_gen_item(task, item)
+
+            self._update_task_counts(task)
+            task["status"] = "completed" if item["status"] == "success" else "failed"
+            task["completed_at"] = datetime.utcnow().isoformat()
+            await self._sync_task_state(task, item=item)
+        finally:
+            task["worker_running"] = False
+
+    async def _generate_single_gen_item(
+        self,
+        task: Dict[str, Any],
+        item: Dict[str, Any],
+    ) -> None:
+        """按 single_mode 调用对应的高级生成方法。"""
+        item["status"] = "running"
+        item["started_at"] = datetime.utcnow().isoformat()
+        task["running_count"] = 1
+        await self._sync_task_state(task, item=item)
+
+        try:
+            config = task["shared_config"]
+            mode = task.get("single_mode")
+            params = item["item_params"]
+            runtime_input = item.get("runtime_input") or {}
+
+            if mode == "custom":
+                result = await poster_service.generate_custom(
+                    prompt=params.get("prompt", ""),
+                    style_tags=config.get("style_tags"),
+                    aspect_ratio=config.get("aspect_ratio", "3:4"),
+                    color_tone=config.get("color_tone"),
+                    reference_images=runtime_input.get("reference_images"),
+                    provider_override=config.get("image_provider"),
+                    image_model_config=config.get("image_model_config"),
+                    brand_kit=config.get("brand_kit"),
+                )
+            elif mode == "edit":
+                result = await poster_service.generate_edit(
+                    image_base64=runtime_input.get("image_base64", ""),
+                    edit_prompt=params.get("edit_prompt", ""),
+                    aspect_ratio=config.get("aspect_ratio", "3:4"),
+                    provider_override=config.get("image_provider"),
+                    image_model_config=config.get("image_model_config"),
+                )
+            else:
+                raise RuntimeError(f"不支持的单张生成模式: {mode}")
+
+            if not result.get("success"):
+                raise RuntimeError(result.get("error") or "AI 图片生成失败")
+
+            item["image_url"] = result.get("image_url")
+            item["ai_prompt_used"] = result.get("prompt_used")
+            item["status"] = "success"
+            await self._save_single_output(task, item, config, result)
+
+        except Exception as exc:
+            item["status"] = "failed"
+            item["error_message"] = str(exc)
+
+        finally:
+            item["completed_at"] = datetime.utcnow().isoformat()
+            task["running_count"] = 0
+            self._update_task_counts(task)
+            await self._sync_task_state(task, item=item)
+
+    async def _save_single_output(
+        self,
+        task: Dict[str, Any],
+        item: Dict[str, Any],
+        config: Dict[str, Any],
+        result: Dict[str, Any],
+    ) -> None:
+        """把单张异步生成结果写入作品库（登录用户）。"""
+        user_id = task.get("user_id")
+        if not user_id or not item.get("image_url"):
+            return
+
+        mode = task.get("single_mode") or "custom"
+        payload = dict(item["item_params"])
+        payload["aspect_ratio"] = config.get("aspect_ratio", "3:4")
+        if config.get("style_tags"):
+            payload["style_tags"] = config.get("style_tags")
+        if config.get("color_tone"):
+            payload["color_tone"] = config.get("color_tone")
+
+        async with async_session_factory() as session:
+            await gallery_service.create_generation_record(
+                session,
+                user_id=UUID(user_id),
+                source_mode=mode,
+                generation_result=result,
+                request_payload=payload,
+                title=self._item_title(item["item_params"]),
+            )
+            await session.commit()
+
     async def run_batch_task(self, task_id: str) -> None:
         """
         异步执行批量生成任务。
@@ -369,16 +540,20 @@ class BatchService:
         task["completed_at"] = None
         await self._sync_task_state(task, sync_all_items=True)
 
-        semaphore = asyncio.Semaphore(MAX_CONCURRENT)
+        if task.get("single_mode"):
+            for item in failed_items:
+                await self._generate_single_gen_item(task, item)
+        else:
+            semaphore = asyncio.Semaphore(MAX_CONCURRENT)
 
-        async def _limited_retry(item: Dict[str, Any]) -> None:
-            async with semaphore:
-                await self._generate_single_item(task, item, task["shared_config"], is_anchor=False)
+            async def _limited_retry(item: Dict[str, Any]) -> None:
+                async with semaphore:
+                    await self._generate_single_item(task, item, task["shared_config"], is_anchor=False)
 
-        await asyncio.gather(
-            *[_limited_retry(item) for item in failed_items],
-            return_exceptions=True,
-        )
+            await asyncio.gather(
+                *[_limited_retry(item) for item in failed_items],
+                return_exceptions=True,
+            )
 
         self._update_task_counts(task)
         task["status"] = "completed" if task["failed_count"] == 0 else "partial_failed"

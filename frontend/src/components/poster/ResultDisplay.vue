@@ -400,7 +400,7 @@ const badgeTailwindClass = computed(() => {
 
 const modeLabel = computed(() => {
   if (!props.result) return ''
-  if (isSingleBatchTask.value) return '模板生成'
+  if (isSingleBatchTask.value) return props.result.single_label || '模板生成'
   return map[props.result.mode]?.label || props.result.mode || ''
 })
 </script>

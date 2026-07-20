@@ -110,6 +110,28 @@ class BatchAppendResponse(BaseModel):
     error: Optional[str] = None
 
 
+class SingleReferenceImage(BaseModel):
+    """自定义生成参考图"""
+    image_base64: str = Field(..., description="参考图 base64 / data URL")
+    name: Optional[str] = Field(None, description="参考图名称，如 图1")
+
+
+class SingleCustomRequest(BaseModel):
+    """单张自定义生成（后台异步）请求"""
+    prompt: str = Field(..., min_length=1, max_length=IMAGE_PROMPT_MAX_LENGTH)
+    style_tags: Optional[List[str]] = None
+    aspect_ratio: str = "3:4"
+    color_tone: Optional[str] = None
+    reference_images: Optional[List[SingleReferenceImage]] = None
+
+
+class SingleEditRequest(BaseModel):
+    """单张以图改图（后台异步）请求"""
+    image_base64: str = Field(..., min_length=1, description="原始图片 base64")
+    edit_prompt: str = Field(..., min_length=1, max_length=IMAGE_PROMPT_MAX_LENGTH)
+    aspect_ratio: str = "3:4"
+
+
 # ======================== 接口 ========================
 
 async def _get_runtime_image_context(
@@ -245,6 +267,102 @@ async def append_template_batch_items(
         background_tasks.add_task(batch_service.run_batch_task, task_id)
 
     return BatchAppendResponse(**result)
+
+
+@router.post(
+    "/single/custom",
+    response_model=BatchGenerateResponse,
+    summary="提交单张自定义生成任务（后台异步）",
+)
+async def single_custom_generate(
+    req: SingleCustomRequest,
+    background_tasks: BackgroundTasks,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """
+    提交单张自定义生成任务，立即返回 task_id，图片在后台生成。
+
+    避免长时间同步请求被反向代理/浏览器判定超时。
+    """
+    try:
+        context = await _get_runtime_image_context(db, current_user)
+        shared_config = {
+            "aspect_ratio": req.aspect_ratio,
+            "color_tone": req.color_tone,
+            "style_tags": req.style_tags,
+            "series_mode": False,
+            **context,
+        }
+        result = await batch_service.create_single_generation_task(
+            mode="custom",
+            params={"prompt": req.prompt},
+            runtime_input={
+                "reference_images": [img.model_dump() for img in (req.reference_images or [])],
+            },
+            shared_config=shared_config,
+            user_id=current_user.id if current_user else None,
+        )
+        background_tasks.add_task(
+            batch_service.run_single_generation_task,
+            result["task_id"],
+        )
+        return BatchGenerateResponse(
+            success=True,
+            task_id=result["task_id"],
+            total_count=1,
+            mode="batch",
+        )
+    except Exception as e:
+        return BatchGenerateResponse(
+            success=False,
+            error=f"创建单张自定义任务失败: {str(e)}",
+        )
+
+
+@router.post(
+    "/single/edit",
+    response_model=BatchGenerateResponse,
+    summary="提交单张以图改图任务（后台异步）",
+)
+async def single_edit_generate(
+    req: SingleEditRequest,
+    background_tasks: BackgroundTasks,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    db: AsyncSession = Depends(get_async_session),
+):
+    """
+    提交单张以图改图任务，立即返回 task_id，图片在后台生成。
+    """
+    try:
+        context = await _get_runtime_image_context(db, current_user)
+        shared_config = {
+            "aspect_ratio": req.aspect_ratio,
+            "series_mode": False,
+            **context,
+        }
+        result = await batch_service.create_single_generation_task(
+            mode="edit",
+            params={"edit_prompt": req.edit_prompt},
+            runtime_input={"image_base64": req.image_base64},
+            shared_config=shared_config,
+            user_id=current_user.id if current_user else None,
+        )
+        background_tasks.add_task(
+            batch_service.run_single_generation_task,
+            result["task_id"],
+        )
+        return BatchGenerateResponse(
+            success=True,
+            task_id=result["task_id"],
+            total_count=1,
+            mode="batch",
+        )
+    except Exception as e:
+        return BatchGenerateResponse(
+            success=False,
+            error=f"创建单张改图任务失败: {str(e)}",
+        )
 
 
 @router.post(
