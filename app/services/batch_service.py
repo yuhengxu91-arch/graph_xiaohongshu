@@ -276,7 +276,6 @@ class BatchService:
                 source_mode=mode,
                 generation_result=result,
                 request_payload=payload,
-                title=self._item_title(item["item_params"]),
             )
             await session.commit()
 

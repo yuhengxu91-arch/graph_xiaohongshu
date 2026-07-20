@@ -61,11 +61,15 @@ class GalleryService:
         params = payload.get("params")
         normalized_tags = self._normalize_tags(tags or payload.get("tags"))
 
+        final_title = title or self._build_title(source_mode, payload, generation_result)
+        if isinstance(final_title, str):
+            final_title = final_title.strip()[:200]
+
         record = PosterGeneration(
             user_id=user_id,
             mode=source_mode,
             source_mode=source_mode,
-            title=title or self._build_title(source_mode, payload, generation_result),
+            title=final_title,
             prompt=self._extract_user_prompt(source_mode, payload, generation_result),
             tags=normalized_tags,
             template_id=payload.get("template_id"),
