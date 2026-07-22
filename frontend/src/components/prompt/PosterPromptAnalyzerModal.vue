@@ -9,14 +9,18 @@
         <button type="button" title="关闭" aria-label="关闭" class="grid h-9 w-9 place-items-center rounded-md text-xl text-slate-400 hover:bg-slate-100 hover:text-slate-700" @click="requestClose">×</button>
       </header>
 
-      <div class="flex-1 overflow-y-auto px-6 py-5">
-        <div v-if="closeConfirmation" class="mb-5 flex items-center justify-between gap-4 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
-          <span>当前分析或编辑内容尚未保存，确定关闭吗？</span>
-          <div class="flex shrink-0 gap-2">
-            <button type="button" class="px-3 py-1.5 font-medium text-slate-600" @click="closeConfirmation = false">继续编辑</button>
-            <button type="button" class="rounded-md bg-amber-600 px-3 py-1.5 font-medium text-white hover:bg-amber-700" @click="confirmClose">确定关闭</button>
+      <div v-if="closeConfirmation" class="fixed inset-0 z-[2200] flex items-center justify-center bg-slate-900/50 p-4">
+        <div class="w-full max-w-md bg-white p-6 shadow-2xl">
+          <h3 class="text-lg font-semibold text-slate-900">确认关闭</h3>
+          <p class="mt-2 text-sm leading-6 text-slate-600">当前分析或编辑内容尚未保存，关闭后将无法恢复。</p>
+          <div class="mt-6 flex justify-end gap-3">
+            <button type="button" class="px-4 py-2 text-sm font-medium text-slate-600 hover:bg-slate-50" @click="closeConfirmation = false">继续编辑</button>
+            <button type="button" class="rounded-md bg-amber-600 px-4 py-2 text-sm font-medium text-white hover:bg-amber-700" @click="confirmClose">确定关闭</button>
           </div>
         </div>
+      </div>
+
+      <div class="flex-1 overflow-y-auto px-6 py-5">
 
         <div class="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
           <div>
@@ -30,7 +34,7 @@
               </span>
             </button>
             <p class="mt-3 text-xs leading-5 text-slate-500">图片将发送至火山方舟 Doubao-Seed-2.1-Pro 分析，请勿上传包含敏感信息的素材。</p>
-            <button type="button" :disabled="!imageBase64 || status === 'analyzing'" class="mt-4 w-full rounded-md bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300" @click="analyzePoster">
+            <button type="button" :disabled="!imageBase64 || status === 'saving' || status === 'analyzing'" class="mt-4 w-full rounded-md bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300" @click="analyzePoster">
               {{ status === 'analyzing' ? '正在分析海报…' : result ? '重新分析' : '开始分析' }}
             </button>
           </div>
@@ -58,7 +62,8 @@
               <span class="text-4xl text-red-500">!</span>
               <h3 class="mt-4 font-semibold text-red-700">分析失败</h3>
               <p class="mt-2 max-w-md text-sm text-red-600">{{ errorMessage }}</p>
-              <button type="button" class="mt-5 rounded-md border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50" @click="analyzePoster">重试分析</button>
+              <button v-if="imageBase64" type="button" class="mt-5 rounded-md border border-red-200 bg-white px-4 py-2 text-sm font-medium text-red-600 hover:bg-red-50" @click="analyzePoster">重试分析</button>
+              <button v-else type="button" class="mt-5 rounded-md border border-slate-200 bg-white px-4 py-2 text-sm font-medium text-slate-700 hover:bg-slate-50" @click="fileInput?.click()">重新选择图片</button>
             </div>
 
             <div v-else-if="result" class="space-y-5">
@@ -99,12 +104,17 @@
                 <textarea id="reverse-generation-prompt" v-model="editedPrompt" :disabled="status === 'saved'" rows="9" class="w-full resize-none border border-slate-200 px-4 py-3 text-sm leading-6 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"></textarea>
               </div>
 
+              <div v-if="result.negative_prompt">
+                <h4 class="text-xs font-semibold uppercase text-slate-400">负面提示词</h4>
+                <p class="mt-2 bg-slate-50 px-3 py-2 text-sm leading-6 text-slate-600">{{ result.negative_prompt }}</p>
+              </div>
+
               <p v-if="actionMessage" :class="actionError ? 'text-red-600' : 'text-green-600'" class="text-sm">{{ actionMessage }}</p>
 
               <div class="flex flex-wrap justify-end gap-3 border-t border-slate-100 pt-4">
                 <button type="button" class="rounded-md border border-slate-200 px-4 py-2.5 text-sm font-medium text-slate-700 hover:bg-slate-50" @click="copyPrompt">{{ copied ? '已复制' : '复制提示词' }}</button>
                 <button type="button" :disabled="status === 'saving' || status === 'saved'" class="rounded-md border border-blue-200 px-4 py-2.5 text-sm font-medium text-blue-700 hover:bg-blue-50 disabled:cursor-not-allowed disabled:opacity-50" @click="savePrompt">{{ status === 'saved' ? '已保存' : status === 'saving' ? '保存中…' : '保存到我的收藏' }}</button>
-                <button type="button" class="rounded-md bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700" @click="applyPrompt">应用到海报生成</button>
+                <button type="button" :disabled="status === 'saving' || status === 'analyzing'" class="rounded-md bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300" @click="applyPrompt">应用到海报生成</button>
               </div>
             </div>
           </div>
@@ -156,6 +166,7 @@ function resetResult() {
 async function handleFileChange(event) {
   const file = event.target.files?.[0]
   if (!file) return
+  requestState.close()
   resetResult()
   try {
     imageBase64.value = await preparePosterImage(file, { quality: 0.92 })
@@ -171,7 +182,7 @@ async function handleFileChange(event) {
 }
 
 async function analyzePoster() {
-  if (!imageBase64.value || status.value === 'analyzing') return
+  if (!imageBase64.value || status.value === 'analyzing' || status.value === 'saving') return
   const requestId = requestState.begin()
   status.value = 'analyzing'
   result.value = null
@@ -212,9 +223,16 @@ async function copyPrompt() {
 async function savePrompt() {
   if (!result.value || status.value === 'saving' || status.value === 'saved') return
   actionMessage.value = ''
+  let payload
   try {
-    const payload = buildReversePromptPayload(result.value, editedPrompt.value)
-    status.value = 'saving'
+    payload = buildReversePromptPayload(result.value, editedPrompt.value)
+  } catch (error) {
+    actionError.value = true
+    actionMessage.value = error.message
+    return
+  }
+  status.value = 'saving'
+  try {
     const saved = await createPrompt(payload)
     savedPromptId.value = saved.id
     status.value = 'saved'
@@ -223,15 +241,24 @@ async function savePrompt() {
     emit('saved', saved)
   } catch (error) {
     status.value = 'success'
+    const normalized = normalizeReverseAnalysisError(error)
     actionError.value = true
-    actionMessage.value = error?.response?.data?.detail || error.message || '保存失败，请重试'
+    actionMessage.value = normalized.code === 'UNKNOWN' ? '保存失败，请重试' : normalized.message
   }
 }
 
 async function applyPrompt() {
+  if (status.value === 'saving' || status.value === 'analyzing') return
   actionMessage.value = ''
+  let content
   try {
-    const content = validateReversePrompt(editedPrompt.value)
+    content = validateReversePrompt(editedPrompt.value)
+  } catch (error) {
+    actionError.value = true
+    actionMessage.value = error.message
+    return
+  }
+  try {
     const transientId = `reverse-analysis:${crypto.randomUUID()}`
     savePromptApplyPayload(sessionStorage, {
       prompt_id: transientId,
@@ -245,8 +272,9 @@ async function applyPrompt() {
     emit('close')
   } catch (error) {
     clearPromptApplyPayload(sessionStorage)
+    normalizeReverseAnalysisError(error)
     actionError.value = true
-    actionMessage.value = error.message || '应用失败，请重试'
+    actionMessage.value = '应用失败，请重试'
   }
 }
 
