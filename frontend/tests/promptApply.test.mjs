@@ -144,6 +144,34 @@ test('prompt library binds apply state and routes supported categories', async (
   assert.match(source, /void usePrompt\(prompt\.id\)/)
 })
 
+test('prompt owners can soft unpublish public prompts from either scope', async () => {
+  const [apiSource, cardSource, librarySource] = await Promise.all([
+    readFile(new URL('../src/api.js', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/prompt/PromptCard.vue', import.meta.url), 'utf8'),
+    readFile(new URL('../src/PromptLibraryPage.vue', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(apiSource, /export async function unpublishPrompt\(id\)/)
+  assert.match(apiSource, /`\/prompts\/\$\{id\}\/unpublish`/)
+
+  assert.match(cardSource, /currentUserId:\s*String/)
+  assert.match(cardSource, /const isOwner = computed/)
+  assert.match(cardSource, /prompt\.user_id === props\.currentUserId/)
+  assert.match(cardSource, /v-if="isOwner"/)
+  assert.match(cardSource, /撤回广场/)
+  assert.match(cardSource, /\$emit\('unpublish', prompt\.id\)/)
+  assert.match(cardSource, /'unpublish'/)
+
+  assert.match(librarySource, /getCurrentUser/)
+  assert.match(librarySource, /unpublishPrompt/)
+  assert.match(librarySource, /:current-user-id="currentUserId"/)
+  assert.match(librarySource, /@unpublish="handleUnpublish"/)
+  assert.match(librarySource, /const handleUnpublish = async \(id\)/)
+  assert.match(librarySource, /撤回后，该提示词将从公共广场移除，但仍保留在我的收藏中/)
+  assert.match(librarySource, /await unpublishPrompt\(id\)/)
+  assert.match(librarySource, /fetchPrompts\(\)/)
+})
+
 test('poster page consumes a prompt application without starting generation', async () => {
   const source = await readFile(
     new URL('../src/PosterPage.vue', import.meta.url),

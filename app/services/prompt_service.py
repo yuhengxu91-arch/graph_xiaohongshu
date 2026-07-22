@@ -173,6 +173,24 @@ class PromptService:
         await db.refresh(snippet)
         return snippet
 
+    async def unpublish_prompt(
+        self,
+        db: AsyncSession,
+        *,
+        user_id: UUID,
+        prompt_id: UUID,
+    ) -> Optional[PromptSnippet]:
+        """将自己的公共提示词撤回个人收藏。"""
+        snippet = await self.get_prompt(db, prompt_id=prompt_id)
+        if snippet is None or snippet.user_id != user_id:
+            return None
+
+        snippet.is_public = False
+        snippet.updated_at = datetime.utcnow()
+        await db.flush()
+        await db.refresh(snippet)
+        return snippet
+
     # =====================================================
     # Fork 公共提示词
     # =====================================================

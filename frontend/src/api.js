@@ -1008,6 +1008,15 @@ export async function publishPrompt(id) {
 }
 
 /**
+ * 从公共广场撤回提示词，保留个人收藏
+ * @param {string} id - 提示词 UUID
+ */
+export async function unpublishPrompt(id) {
+  const res = await api.post(`/prompts/${id}/unpublish`)
+  return res.data
+}
+
+/**
  * Fork 公共提示词到个人库
  * @param {string} id - 提示词 UUID
  */

@@ -96,11 +96,13 @@
           v-for="prompt in prompts" 
           :key="prompt.id" 
           :prompt="prompt"
+          :current-user-id="currentUserId"
           :applying="applyingPromptId === prompt.id"
           :apply-disabled="Boolean(applyingPromptId)"
           @edit="openEditor(prompt)"
           @delete="handleDelete"
           @publish="handlePublish"
+          @unpublish="handleUnpublish"
           @use="handleApply"
         />
       </div>
@@ -140,7 +142,7 @@
 <script setup>
 import { ref, onMounted, watch } from 'vue'
 import { isNavigationFailure, useRouter } from 'vue-router'
-import { getPromptList, deletePrompt, publishPrompt, usePrompt } from './api'
+import { getCurrentUser, getPromptList, deletePrompt, publishPrompt, unpublishPrompt, usePrompt } from './api'
 import PromptCard from './components/prompt/PromptCard.vue'
 import PromptEditor from './components/prompt/PromptEditor.vue'
 import ConfirmModal from './components/common/ConfirmModal.vue'
@@ -207,6 +209,7 @@ const activeCategory = ref('all')
 const activeScope = ref('mine')
 const searchKeyword = ref('')
 const applyingPromptId = ref('')
+const currentUserId = ref('')
 
 const showEditor = ref(false)
 const editingPrompt = ref(null)
@@ -246,8 +249,13 @@ watch([activeCategory, activeScope], () => {
   fetchPrompts()
 })
 
-onMounted(() => {
-  fetchPrompts()
+onMounted(async () => {
+  await Promise.all([
+    fetchPrompts(),
+    getCurrentUser()
+      .then(user => { currentUserId.value = user.id })
+      .catch(error => { console.error('获取当前用户失败:', error) })
+  ])
 })
 
 // 操作处理器
@@ -302,6 +310,26 @@ const handlePublish = async (id) => {
       fetchPrompts()
     } catch (e) {
       showToast('发布失败', 'error')
+    }
+  }
+}
+
+const handleUnpublish = async (id) => {
+  const confirmed = await showConfirm({
+    title: '撤回公共广场',
+    message: '撤回后，该提示词将从公共广场移除，但仍保留在我的收藏中，使用次数和历史数据不会删除。',
+    confirmText: '确认撤回',
+    cancelText: '取消',
+    danger: false
+  })
+
+  if (confirmed) {
+    try {
+      await unpublishPrompt(id)
+      showToast('已从公共广场撤回')
+      fetchPrompts()
+    } catch (error) {
+      showToast(error.response?.data?.detail || '撤回失败，请重试', 'error')
     }
   }
 }

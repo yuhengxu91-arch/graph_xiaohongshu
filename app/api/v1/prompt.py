@@ -134,6 +134,25 @@ async def publish_prompt(
     return prompt_service.serialize(snippet)
 
 
+@router.post("/{prompt_id}/unpublish", summary="从公共广场撤回提示词")
+async def unpublish_prompt(
+    prompt_id: UUID,
+    current_user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_async_session),
+):
+    snippet = await prompt_service.unpublish_prompt(
+        db,
+        user_id=current_user.id,
+        prompt_id=prompt_id,
+    )
+    if snippet is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="提示词不存在或无权撤回",
+        )
+    return prompt_service.serialize(snippet)
+
+
 @router.post("/{prompt_id}/fork", summary="Fork 公共提示词到个人库")
 async def fork_prompt(
     prompt_id: UUID,

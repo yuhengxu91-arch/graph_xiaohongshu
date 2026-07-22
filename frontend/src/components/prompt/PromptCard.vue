@@ -17,7 +17,7 @@
       </div>
       
       <!-- 操作菜单 -->
-      <div class="relative shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+      <div v-if="isOwner" class="relative shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
         <button 
           @click="showMenu = !showMenu"
           @blur="closeMenuDelay"
@@ -31,6 +31,7 @@
         <div v-if="showMenu" class="absolute right-0 mt-1 w-28 bg-white rounded-xl shadow-lg border border-slate-100 py-1 z-20">
           <button @click="$emit('edit', prompt)" class="w-full text-left px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 hover:text-blue-600">编辑</button>
           <button v-if="!prompt.is_public" @click="$emit('publish', prompt.id)" class="w-full text-left px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50 hover:text-green-600">发布共享</button>
+          <button v-else @click="$emit('unpublish', prompt.id)" class="w-full text-left px-3 py-1.5 text-sm text-amber-600 hover:bg-amber-50">撤回广场</button>
           <button @click="$emit('delete', prompt.id)" class="w-full text-left px-3 py-1.5 text-sm text-red-600 hover:bg-red-50">删除</button>
         </div>
       </div>
@@ -89,15 +90,17 @@ const props = defineProps({
     type: Object,
     required: true
   },
+  currentUserId: String,
   applying: Boolean,
   applyDisabled: Boolean
 })
 
-const emit = defineEmits(['edit', 'delete', 'publish', 'use'])
+const emit = defineEmits(['edit', 'delete', 'publish', 'unpublish', 'use'])
 
 const showMenu = ref(false)
 const copied = ref(false)
 const canApply = computed(() => APPLICABLE_PROMPT_CATEGORIES.includes(props.prompt.category))
+const isOwner = computed(() => props.prompt.user_id === props.currentUserId)
 
 const closeMenuDelay = () => {
   setTimeout(() => {
