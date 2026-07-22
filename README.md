@@ -251,6 +251,13 @@ IMAGE_MODEL=gemini-3-pro-image-preview
 # 豆包生图（复用 LLM_API_KEY）
 DOUBAO_IMAGE_MODEL=doubao-seedream-4-5-251128
 
+# ===== 海报提示词逆向分析（火山方舟 Responses API）=====
+# ARK_VISION_MODEL 填 Doubao-Seed-2.1-Pro 的推理接入点 ID，不是展示名称。
+ARK_API_KEY=your_ark_api_key
+ARK_VISION_MODEL=ep-your-doubao-seed-2-1-pro-endpoint
+ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+ARK_VISION_TIMEOUT=120
+
 # ===== 日志 =====
 LOG_LEVEL=INFO                     # DEBUG / INFO / WARNING / ERROR
 LOG_TARGET=file                    # file / loki / aliyun / volcengine
@@ -311,6 +318,14 @@ stop.bat
 | POST | `/erase` | 智能擦除 |
 | POST | `/adapt` | 单比例尺寸适配 |
 | POST | `/export-all` | 全平台一键导出 |
+
+### 提示词库 `/api/v1/prompts`
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| POST | `/reverse-analyze` | 使用火山方舟分析海报并返回结构化提示词 |
+
+> 海报逆向分析的 API Key 仅应注入后端环境，禁止写入前端或提交到 Git。当前每用户并发与小时频率限制保存在单个 backend 进程内；生产环境扩容到多个 backend 实例前，必须迁移为 Redis 等共享限流存储，否则实例间计数不一致。
 
 ### 批量生成 `/api/v1/poster/batch`
 

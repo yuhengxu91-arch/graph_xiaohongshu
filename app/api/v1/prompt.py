@@ -8,12 +8,17 @@ from typing import Any, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
+from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.db import get_async_session
 from app.dependencies.auth import get_current_user
 from app.models.user import User
+from app.services.poster_prompt_analyzer import (
+    PosterAnalysisError,
+    poster_prompt_analyzer,
+)
 from app.services.prompt_service import prompt_service
 
 router = APIRouter(prefix="/prompts", tags=["Prompts"])
@@ -37,6 +42,29 @@ class UpdatePromptRequest(BaseModel):
     category: Optional[str] = Field(default=None, max_length=30)
     tags: Optional[list[str]] = None
     source_mode: Optional[str] = Field(default=None, max_length=30)
+
+
+class ReverseAnalyzeRequest(BaseModel):
+    """海报逆向分析请求。"""
+
+    model_config = ConfigDict(strict=True)
+    image_base64: str = Field(min_length=1, max_length=14 * 1024 * 1024)
+
+
+_reverse_security = HTTPBearer(auto_error=False)
+
+
+async def _get_reverse_current_user(
+    credentials: HTTPAuthorizationCredentials | None = Depends(_reverse_security),
+    db: AsyncSession = Depends(get_async_session),
+) -> User:
+    if credentials is None:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="无效的认证凭证",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    return await get_current_user(credentials=credentials, db=db)
 
 
 # ========== 路由 ==========
@@ -72,6 +100,26 @@ async def create_prompt(
         data=data,
     )
     return prompt_service.serialize(snippet)
+
+
+@router.post("/reverse-analyze", summary="逆向分析海报提示词")
+async def reverse_analyze_prompt(
+    request: ReverseAnalyzeRequest,
+    current_user: User = Depends(_get_reverse_current_user),
+):
+    try:
+        result = await poster_prompt_analyzer.analyze(
+            str(current_user.id),
+            request.image_base64,
+        )
+    except PosterAnalysisError as exc:
+        headers = {"Retry-After": exc.retry_after} if exc.retry_after else None
+        raise HTTPException(
+            status_code=exc.status_code,
+            detail={"code": exc.code, "message": exc.message},
+            headers=headers,
+        ) from None
+    return result.model_dump()
 
 
 @router.put("/{prompt_id}", summary="编辑提示词")

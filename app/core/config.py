@@ -54,6 +54,12 @@ class Settings(BaseSettings):
     sales_api_timeout: float = 30.0
     sales_uploaded_by: str = "graph_xiaohongshu"
 
+    # ============== 火山方舟海报视觉分析 ==============
+    ark_api_key: str = ""
+    ark_vision_model: str = ""
+    ark_base_url: str = "https://ark.cn-beijing.volces.com/api/v3"
+    ark_vision_timeout: float = 120.0
+
     # ============== 管理员配置 ==============
     # 逗号分隔用户名；另外系统会把最早创建的用户视为管理员，便于老项目无角色字段时使用。
     admin_usernames: str = "admin"
