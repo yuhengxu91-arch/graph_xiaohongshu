@@ -971,6 +971,15 @@ export async function createPrompt(data) {
 }
 
 /**
+ * 上传海报并逆向分析为可复用提示词
+ * @param {Object} data - { image_base64 }
+ */
+export async function reverseAnalyzePrompt(data) {
+  const res = await api.post('/prompts/reverse-analyze', data)
+  return res.data
+}
+
+/**
  * 编辑提示词
  * @param {string} id - 提示词 UUID
  * @param {Object} data - { title?, content?, category?, tags?, source_mode? }

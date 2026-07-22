@@ -9,12 +9,20 @@
         <p class="text-sm text-slate-500 mt-1">收藏您的高效提示词，让每次创作都有迹可循</p>
       </div>
       
-      <button 
-        @click="openEditor()"
-        class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-medium transition-colors shadow-sm shadow-blue-600/20 flex items-center gap-2"
-      >
-        <span>➕</span> 新建 Prompt
-      </button>
+      <div class="flex items-center gap-3">
+        <button
+          @click="showReverseAnalyzer = true"
+          class="border border-blue-200 bg-white px-5 py-2.5 font-medium text-blue-700 transition-colors hover:bg-blue-50 flex items-center gap-2"
+        >
+          <span>⌕</span> 海报逆向
+        </button>
+        <button
+          @click="openEditor()"
+          class="bg-blue-600 hover:bg-blue-700 text-white px-5 py-2.5 rounded-xl font-medium transition-colors shadow-sm shadow-blue-600/20 flex items-center gap-2"
+        >
+          <span>➕</span> 新建 Prompt
+        </button>
+      </div>
     </div>
 
     <!-- 过滤器栏 -->
@@ -116,6 +124,12 @@
       @saved="handleSaved"
     />
 
+    <PosterPromptAnalyzerModal
+      v-if="showReverseAnalyzer"
+      @close="showReverseAnalyzer = false"
+      @saved="handleReverseSaved"
+    />
+
     <!-- 确认弹窗 -->
     <ConfirmModal
       :is-open="confirmModal.isOpen"
@@ -145,6 +159,7 @@ import { isNavigationFailure, useRouter } from 'vue-router'
 import { getCurrentUser, getPromptList, deletePrompt, publishPrompt, unpublishPrompt, usePrompt } from './api'
 import PromptCard from './components/prompt/PromptCard.vue'
 import PromptEditor from './components/prompt/PromptEditor.vue'
+import PosterPromptAnalyzerModal from './components/prompt/PosterPromptAnalyzerModal.vue'
 import ConfirmModal from './components/common/ConfirmModal.vue'
 import {
   APPLICABLE_PROMPT_CATEGORIES,
@@ -213,6 +228,7 @@ const currentUserId = ref('')
 
 const showEditor = ref(false)
 const editingPrompt = ref(null)
+const showReverseAnalyzer = ref(false)
 
 // 常量
 const categories = [
@@ -272,6 +288,13 @@ const closeEditor = () => {
 const handleSaved = () => {
   closeEditor()
   fetchPrompts()
+}
+
+const handleReverseSaved = () => {
+  activeScope.value = 'mine'
+  activeCategory.value = 'poster'
+  fetchPrompts()
+  showToast('逆向提示词已保存')
 }
 
 const handleDelete = async (id) => {
