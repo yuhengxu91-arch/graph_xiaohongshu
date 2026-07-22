@@ -24,8 +24,8 @@
 
         <div class="grid gap-6 lg:grid-cols-[340px_minmax(0,1fr)]">
           <div>
-            <input ref="fileInput" class="hidden" type="file" accept="image/jpeg,image/png,image/webp" @change="handleFileChange" />
-            <button type="button" class="relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 text-center transition hover:border-blue-400 hover:bg-blue-50/40" @click="fileInput?.click()">
+            <input ref="fileInput" class="hidden" type="file" accept="image/jpeg,image/png,image/webp" :disabled="imagePreparing || status === 'saving'" @change="handleFileChange" />
+            <button type="button" :disabled="imagePreparing || status === 'saving'" class="relative flex aspect-[3/4] w-full items-center justify-center overflow-hidden border-2 border-dashed border-slate-200 bg-slate-50 text-center transition hover:border-blue-400 hover:bg-blue-50/40 disabled:cursor-not-allowed disabled:opacity-60" @click="fileInput?.click()">
               <img v-if="imagePreview" :src="imagePreview" alt="待分析海报预览" class="h-full w-full object-contain" />
               <span v-else class="px-8">
                 <span class="mx-auto grid h-12 w-12 place-items-center rounded-full bg-blue-50 text-2xl">↑</span>
@@ -34,8 +34,8 @@
               </span>
             </button>
             <p class="mt-3 text-xs leading-5 text-slate-500">图片将发送至火山方舟 Doubao-Seed-2.1-Pro 分析，请勿上传包含敏感信息的素材。</p>
-            <button type="button" :disabled="!imageBase64 || status === 'saving' || status === 'analyzing'" class="mt-4 w-full rounded-md bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300" @click="analyzePoster">
-              {{ status === 'analyzing' ? '正在分析海报…' : result ? '重新分析' : '开始分析' }}
+            <button type="button" :disabled="!imageBase64 || imagePreparing || status === 'saving' || status === 'analyzing'" class="mt-4 w-full rounded-md bg-blue-600 px-4 py-3 text-sm font-semibold text-white hover:bg-blue-700 disabled:cursor-not-allowed disabled:bg-slate-300" @click="analyzePoster">
+              {{ imagePreparing ? '正在处理图片…' : status === 'analyzing' ? '正在分析海报…' : result ? '重新分析' : '开始分析' }}
             </button>
           </div>
 
@@ -140,6 +140,8 @@ import { clearPromptApplyPayload, savePromptApplyPayload } from '../../utils/pro
 const emit = defineEmits(['close', 'saved'])
 const router = useRouter()
 const requestState = createReverseAnalysisRequestState()
+const imagePreparationState = createReverseAnalysisRequestState()
+const saveRequestState = createReverseAnalysisRequestState()
 const fileInput = ref(null)
 const imagePreview = ref('')
 const imageBase64 = ref('')
@@ -152,6 +154,7 @@ const actionError = ref(false)
 const copied = ref(false)
 const savedPromptId = ref('')
 const closeConfirmation = ref(false)
+const imagePreparing = ref(false)
 
 function resetResult() {
   result.value = null
@@ -165,18 +168,25 @@ function resetResult() {
 
 async function handleFileChange(event) {
   const file = event.target.files?.[0]
-  if (!file) return
+  if (!file || status.value === 'saving') return
   requestState.close()
+  saveRequestState.close()
+  const preparationId = imagePreparationState.begin()
+  imagePreparing.value = true
   resetResult()
   try {
-    imageBase64.value = await preparePosterImage(file, { quality: 0.92 })
-    imagePreview.value = imageBase64.value
+    const prepared = await preparePosterImage(file, { quality: 0.92 })
+    if (!imagePreparationState.accept(preparationId)) return
+    imageBase64.value = prepared
+    imagePreview.value = prepared
   } catch (error) {
+    if (!imagePreparationState.accept(preparationId)) return
     imageBase64.value = ''
     imagePreview.value = ''
     status.value = 'error'
     errorMessage.value = error.message || '图片处理失败，请重试'
   } finally {
+    if (imagePreparationState.accept(preparationId)) imagePreparing.value = false
     event.target.value = ''
   }
 }
@@ -232,14 +242,17 @@ async function savePrompt() {
     return
   }
   status.value = 'saving'
+  const saveId = saveRequestState.begin()
   try {
     const saved = await createPrompt(payload)
+    if (!saveRequestState.accept(saveId)) return
     savedPromptId.value = saved.id
     status.value = 'saved'
     actionError.value = false
     actionMessage.value = '已保存到我的收藏'
     emit('saved', saved)
   } catch (error) {
+    if (!saveRequestState.accept(saveId)) return
     status.value = 'success'
     const normalized = normalizeReverseAnalysisError(error)
     actionError.value = true
@@ -279,7 +292,9 @@ async function applyPrompt() {
 }
 
 function requestClose() {
-  const hasUnsavedWork = status.value === 'analyzing'
+  const hasUnsavedWork = imagePreparing.value
+    || status.value === 'analyzing'
+    || status.value === 'saving'
     || Boolean(result.value && status.value !== 'saved')
   if (hasUnsavedWork) {
     closeConfirmation.value = true
@@ -290,9 +305,15 @@ function requestClose() {
 
 function confirmClose() {
   requestState.close()
+  imagePreparationState.close()
+  saveRequestState.close()
   closeConfirmation.value = false
   emit('close')
 }
 
-onBeforeUnmount(() => requestState.close())
+onBeforeUnmount(() => {
+  requestState.close()
+  imagePreparationState.close()
+  saveRequestState.close()
+})
 </script>
