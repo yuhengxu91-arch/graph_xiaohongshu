@@ -94,6 +94,7 @@ test('poster reverse modal and prompt library expose the complete workflow', asy
   assert.doesNotMatch(modal, /@keyup\.esc|@keydown\.esc/)
   assert.match(modal, /result\.negative_prompt/)
   assert.match(modal, /status === 'saving' \|\| status === 'analyzing'/)
+  assert.match(modal, /<textarea[^>]*:disabled="status === 'saving' \|\| status === 'saved'"/)
   assert.match(modal, /normalizeReverseAnalysisError\(error\)/)
   assert.match(modal, /v-if="imageBase64"[\s\S]*?>重试分析</)
   assert.match(modal, /fixed inset-0 z-\[2200\]/)

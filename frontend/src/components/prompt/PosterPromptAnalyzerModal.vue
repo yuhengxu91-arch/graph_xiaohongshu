@@ -101,7 +101,7 @@
                   <label for="reverse-generation-prompt" class="text-sm font-semibold text-slate-800">生成提示词</label>
                   <span :class="editedPrompt.length > 4000 ? 'text-red-500' : 'text-slate-400'" class="text-xs">{{ editedPrompt.length }} / 4000</span>
                 </div>
-                <textarea id="reverse-generation-prompt" v-model="editedPrompt" :disabled="status === 'saved'" rows="9" class="w-full resize-none border border-slate-200 px-4 py-3 text-sm leading-6 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"></textarea>
+                <textarea id="reverse-generation-prompt" v-model="editedPrompt" :disabled="status === 'saving' || status === 'saved'" rows="9" class="w-full resize-none border border-slate-200 px-4 py-3 text-sm leading-6 text-slate-800 outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100 disabled:bg-slate-50"></textarea>
               </div>
 
               <div v-if="result.negative_prompt">
