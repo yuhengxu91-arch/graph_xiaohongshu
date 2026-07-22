@@ -975,7 +975,7 @@ export async function createPrompt(data) {
  * @param {Object} data - { image_base64 }
  */
 export async function reverseAnalyzePrompt(data) {
-  const res = await api.post('/prompts/reverse-analyze', data)
+  const res = await api.post('/prompts/reverse-analyze', data, { timeout: 150000 })
   return res.data
 }
 

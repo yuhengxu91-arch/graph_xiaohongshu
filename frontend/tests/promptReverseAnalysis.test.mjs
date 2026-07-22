@@ -70,6 +70,7 @@ test('poster reverse modal and prompt library expose the complete workflow', asy
 
   assert.match(api, /export async function reverseAnalyzePrompt\(data\)/)
   assert.match(api, /post\('\/prompts\/reverse-analyze'/)
+  assert.match(api, /timeout:\s*150000/)
   assert.match(library, /PosterPromptAnalyzerModal/)
   assert.match(library, /海报逆向/)
   assert.match(library, /showReverseAnalyzer/)
