@@ -279,6 +279,7 @@ class PosterPromptAnalyzerHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(properties["typography"]["items"]["maxLength"], 100)
         self.assertEqual(properties["visual_style"]["items"]["maxLength"], 100)
         self.assertEqual(properties["generation_prompt"]["maxLength"], 4000)
+        self.assertEqual(properties["color_palette"]["items"]["pattern"], r"^#[0-9A-Fa-f]{6}$")
 
     async def test_extracts_nested_output_text(self):
         response = {
@@ -299,6 +300,14 @@ class PosterPromptAnalyzerHttpTests(unittest.IsolatedAsyncioTestCase):
     async def test_rejects_empty_non_json_or_schema_invalid_output(self):
         for output in ("", "not-json", json.dumps({"is_poster": True})):
             analyzer, _ = self.make_analyzer([FakeResponse(payload={"output_text": output})])
+            with self.assertRaises(PosterAnalysisError) as ctx:
+                await analyzer.analyze(str(uuid4()), self.image)
+            self.assertEqual(ctx.exception.code, "UPSTREAM_INVALID_RESPONSE")
+
+    async def test_rejects_valid_json_with_unexpected_container_shapes(self):
+        malformed_payloads = [[], "text", {"output": [1]}, {"output": [{"content": [1]}]}]
+        for payload in malformed_payloads:
+            analyzer, _ = self.make_analyzer([FakeResponse(payload=payload)])
             with self.assertRaises(PosterAnalysisError) as ctx:
                 await analyzer.analyze(str(uuid4()), self.image)
             self.assertEqual(ctx.exception.code, "UPSTREAM_INVALID_RESPONSE")
@@ -392,6 +401,28 @@ class PosterPromptAnalyzerHttpTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(ctx.exception.code, "CONTENT_REJECTED")
         self.assertEqual(ctx.exception.status_code, 422)
         self.assertEqual(len(client.requests), 1)
+
+    async def test_maps_sensitive_image_error_code_to_content_rejected(self):
+        analyzer, _ = self.make_analyzer([
+            FakeResponse(
+                status_code=400,
+                payload={"error": {"code": "InputImageSensitiveContentDetected"}},
+            )
+        ])
+        with self.assertRaises(PosterAnalysisError) as ctx:
+            await analyzer.analyze(str(uuid4()), self.image)
+        self.assertEqual(ctx.exception.code, "CONTENT_REJECTED")
+        self.assertEqual(ctx.exception.status_code, 422)
+
+    async def test_invalid_response_logs_request_id_and_safe_error_code(self):
+        analyzer, _ = self.make_analyzer([FakeResponse(payload=[])])
+        with self.assertLogs("app.services.poster_prompt_analyzer", level="WARNING") as logs:
+            with self.assertRaises(PosterAnalysisError):
+                await analyzer.analyze(str(uuid4()), self.image)
+        combined = "\n".join(logs.output)
+        self.assertIn("id=", combined)
+        self.assertIn("UPSTREAM_INVALID_RESPONSE", combined)
+        self.assertNotIn("data:image", combined)
 
     async def test_stops_after_one_server_error_retry_and_logs_no_sensitive_data(self):
         analyzer, client = self.make_analyzer(

@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 
 RecognizedText = Annotated[str, Field(max_length=200)]
 StyleLabel = Annotated[str, Field(max_length=100)]
+HexColor = Annotated[str, Field(pattern=r"^#[0-9A-Fa-f]{6}$")]
 
 
 class PosterAnalysisError(Exception):
@@ -55,7 +56,7 @@ class PosterAnalysisResult(BaseModel):
     poster_type: str = Field(max_length=50)
     recognized_text: list[RecognizedText] = Field(max_length=50)
     layout_description: str = Field(max_length=1000)
-    color_palette: list[str] = Field(max_length=12)
+    color_palette: list[HexColor] = Field(max_length=12)
     typography: list[StyleLabel] = Field(max_length=12)
     visual_style: list[StyleLabel] = Field(max_length=12)
     generation_prompt: str = Field(max_length=4000)
@@ -290,6 +291,12 @@ class PosterPromptAnalyzer:
 
     @staticmethod
     def _extract_output(response_data: dict[str, Any]) -> str:
+        if not isinstance(response_data, dict):
+            raise PosterAnalysisError(
+                "UPSTREAM_INVALID_RESPONSE",
+                "视觉模型返回格式无效",
+                status_code=502,
+            )
         if response_data.get("status") == "incomplete":
             reason = (response_data.get("incomplete_details") or {}).get("reason")
             if reason in {"content_filter", "safety", "moderation"}:
@@ -308,8 +315,18 @@ class PosterPromptAnalyzer:
         if isinstance(output_text, str) and output_text.strip():
             return output_text
 
-        for output in response_data.get("output") or []:
-            for content in output.get("content") or []:
+        outputs = response_data.get("output") or []
+        if not isinstance(outputs, list):
+            outputs = []
+        for output in outputs:
+            if not isinstance(output, dict):
+                continue
+            contents = output.get("content") or []
+            if not isinstance(contents, list):
+                continue
+            for content in contents:
+                if not isinstance(content, dict):
+                    continue
                 if content.get("type") == "refusal":
                     raise PosterAnalysisError(
                         "CONTENT_REJECTED",
@@ -333,7 +350,7 @@ class PosterPromptAnalyzer:
             return PosterAnalysisResult.model_validate(raw_result)
         except PosterAnalysisError:
             raise
-        except (json.JSONDecodeError, TypeError, ValidationError):
+        except (json.JSONDecodeError, TypeError, AttributeError, ValidationError):
             raise PosterAnalysisError(
                 "UPSTREAM_INVALID_RESPONSE",
                 "视觉模型返回格式无效",
@@ -369,7 +386,13 @@ class PosterPromptAnalyzer:
             )
             if any(
                 marker in error_marker
-                for marker in ("content_filter", "content_policy", "moderation", "safety")
+                for marker in (
+                    "content_filter",
+                    "content_policy",
+                    "moderation",
+                    "safety",
+                    "sensitivecontent",
+                )
             ):
                 return PosterAnalysisError(
                     "CONTENT_REJECTED",
@@ -444,20 +467,31 @@ class PosterPromptAnalyzer:
         )
 
     async def analyze(self, user_id: str, image_base64: str) -> PosterAnalysisResult:
-        if not self.settings.ark_api_key or not self.settings.ark_vision_model:
-            raise PosterAnalysisError(
-                "MODEL_NOT_CONFIGURED",
-                "海报分析模型尚未配置",
-                status_code=503,
-            )
-
+        request_id = uuid.uuid4().hex
         normalized_user_id = str(user_id)
-        await self.limiter.acquire(normalized_user_id)
+        acquired = False
         try:
+            if not self.settings.ark_api_key or not self.settings.ark_vision_model:
+                raise PosterAnalysisError(
+                    "MODEL_NOT_CONFIGURED",
+                    "海报分析模型尚未配置",
+                    status_code=503,
+                )
+            await self.limiter.acquire(normalized_user_id)
+            acquired = True
             sanitized_image = self.sanitize_image(image_base64)
-            return await self._request(sanitized_image, uuid.uuid4().hex)
+            return await self._request(sanitized_image, request_id)
+        except PosterAnalysisError as exc:
+            logger.warning(
+                "poster_analysis_failed id=%s code=%s status=%s",
+                request_id,
+                exc.code,
+                exc.status_code,
+            )
+            raise
         finally:
-            await self.limiter.release(normalized_user_id)
+            if acquired:
+                await self.limiter.release(normalized_user_id)
 
 
 poster_prompt_analyzer = PosterPromptAnalyzer()

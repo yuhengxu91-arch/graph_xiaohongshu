@@ -553,6 +553,8 @@ docker push crpi-dxpwwh2xu5fk4t07.cn-hangzhou.personal.cr.aliyuncs.com/graph-xhs
 | `LLM_API_KEY` | `your-llm-api-key` | 火山引擎方舟平台大模型 API Key |
 | `IMAGE_API_KEY` | `your-image-api-key` | Gemini API Key（海报生成 + 配图） |
 | `JWT_SECRET_KEY` | 随机字符串 | JWT 签名密钥（**必须修改默认值**） |
+| `ARK_API_KEY` | `your-ark-api-key` | 海报逆向分析使用的火山方舟官方 API Key |
+| `ARK_VISION_MODEL` | `ep-your-endpoint-id` | Doubao-Seed-2.1-Pro 推理接入点 ID |
 
 > ⚠️ **数据库连接串说明**：
 > - 两个连接串指向**同一个 RDS Serverless 实例**，仅协议前缀不同（`postgresql+asyncpg://` vs `postgresql://`）
@@ -568,6 +570,8 @@ docker push crpi-dxpwwh2xu5fk4t07.cn-hangzhou.personal.cr.aliyuncs.com/graph-xhs
 | `LLM_MODEL` | `doubao-seed-1-8-251228` | 标准 LLM 模型（文章写作） |
 | `LLM_MODEL_FAST` | `doubao-seed-1-6-flash-250828` | 快速 LLM 模型（选题生成） |
 | `LLM_TEMPERATURE` | `0.7` | 标准模型温度 |
+| `ARK_BASE_URL` | `https://ark.cn-beijing.volces.com/api/v3` | 火山方舟 Responses API 基础地址 |
+| `ARK_VISION_TIMEOUT` | `120` | 海报逆向分析超时秒数 |
 | `LLM_TEMPERATURE_FAST` | `0.7` | 快速模型温度 |
 | `LLM_TEMPERATURE_EXTRACT` | `0.4` | 提取模型温度（配图要点） |
 | `IMAGE_BASE_URL` | `https://cn-beijing.yuannengai.com` | 图片生成 API 基础地址 |
