@@ -235,7 +235,7 @@ DATABASE_URL=postgresql+asyncpg://postgres:your_password@localhost:5432/langgrap
 POSTGRES_URI=postgresql://postgres:your_password@localhost:5432/langgraph_db
 
 # ===== LLM 配置（火山引擎 Doubao）=====
-LLM_API_KEY=your_ark_api_key
+LLM_API_KEY=your_volcengine_api_key
 LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 LLM_MODEL=doubao-seed-1-8-251228
 LLM_MODEL_FAST=doubao-seed-1-6-flash-250828
@@ -252,10 +252,9 @@ IMAGE_MODEL=gemini-3-pro-image-preview
 DOUBAO_IMAGE_MODEL=doubao-seedream-4-5-251128
 
 # ===== 海报提示词逆向分析（火山方舟 Responses API）=====
+# API Key 和 Base URL 复用上面的 LLM_API_KEY、LLM_BASE_URL。
 # ARK_VISION_MODEL 填 Doubao-Seed-2.1-Pro 的推理接入点 ID，不是展示名称。
-ARK_API_KEY=your_ark_api_key
 ARK_VISION_MODEL=ep-your-doubao-seed-2-1-pro-endpoint
-ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 ARK_VISION_TIMEOUT=120
 
 # ===== 日志 =====

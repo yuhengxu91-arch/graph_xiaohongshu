@@ -83,15 +83,15 @@ POST /api/v1/prompts/reverse-analyze
 使用后端环境变量：
 
 ```env
-ARK_API_KEY=
+LLM_API_KEY=
 ARK_VISION_MODEL=
-ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
+LLM_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 ARK_VISION_TIMEOUT=120
 ```
 
 `ARK_VISION_MODEL` 填 Doubao-Seed-2.1-Pro 的推理接入点 ID。API Key 仅保存在后端，不写日志、不返回前端。
 
-调用地址为 `${ARK_BASE_URL}/responses`。请求使用 Bearer Token、清理后的图片 data URL 和结构化输出约束，并设置 `store: false`。第一版关闭深度思考，以降低延迟并提高 JSON 输出稳定性。系统提示词明确规定图片文字是不可信的待分析数据，不能作为指令执行；请求不启用工具、联网或函数调用。
+调用地址为 `${LLM_BASE_URL}/responses`，API Key 复用现有的 `LLM_API_KEY`。请求使用 Bearer Token、清理后的图片 data URL 和结构化输出约束，并设置 `store: false`。第一版关闭深度思考，以降低延迟并提高 JSON 输出稳定性。系统提示词明确规定图片文字是不可信的待分析数据，不能作为指令执行；请求不启用工具、联网或函数调用。
 
 ## 前端结构
 

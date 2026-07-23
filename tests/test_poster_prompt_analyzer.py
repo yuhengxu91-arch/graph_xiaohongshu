@@ -232,9 +232,9 @@ class PosterPromptAnalyzerHttpTests(unittest.IsolatedAsyncioTestCase):
     def setUp(self):
         self.image = image_data_url(Image.new("RGB", (8, 8), "red"))
         self.settings = SimpleNamespace(
-            ark_api_key="ark-secret-key",
+            llm_api_key="ark-secret-key",
             ark_vision_model="ep-doubao-seed-2-1-pro",
-            ark_base_url="https://ark.example/api/v3/",
+            llm_base_url="https://ark.example/api/v3/",
             ark_vision_timeout=12.0,
         )
 
@@ -324,8 +324,8 @@ class PosterPromptAnalyzerHttpTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(ctx.exception.code, "CONTENT_REJECTED")
             self.assertEqual(ctx.exception.status_code, 422)
 
-    async def test_requires_both_ark_key_and_model(self):
-        for field in ("ark_api_key", "ark_vision_model"):
+    async def test_requires_shared_llm_key_and_vision_model(self):
+        for field in ("llm_api_key", "ark_vision_model"):
             settings_obj = SimpleNamespace(**vars(self.settings))
             setattr(settings_obj, field, "")
             analyzer = PosterPromptAnalyzer(settings_obj=settings_obj)

@@ -406,9 +406,9 @@ class PosterPromptAnalyzer:
         )
 
     async def _request(self, sanitized_image: str, request_id: str) -> PosterAnalysisResult:
-        url = self.settings.ark_base_url.rstrip("/") + "/responses"
+        url = self.settings.llm_base_url.rstrip("/") + "/responses"
         headers = {
-            "Authorization": f"Bearer {self.settings.ark_api_key}",
+            "Authorization": f"Bearer {self.settings.llm_api_key}",
             "Content-Type": "application/json",
         }
         payload = self._build_payload(sanitized_image)
@@ -471,7 +471,7 @@ class PosterPromptAnalyzer:
         normalized_user_id = str(user_id)
         acquired = False
         try:
-            if not self.settings.ark_api_key or not self.settings.ark_vision_model:
+            if not self.settings.llm_api_key or not self.settings.ark_vision_model:
                 raise PosterAnalysisError(
                     "MODEL_NOT_CONFIGURED",
                     "海报分析模型尚未配置",

@@ -79,7 +79,7 @@
 
 **Files:** Modify `README.md`（或现有部署文档）及上述实现文件
 
-- [ ] 记录 `ARK_API_KEY`、`ARK_VISION_MODEL`、`ARK_BASE_URL`、`ARK_VISION_TIMEOUT` 的无密钥示例；注明当前限流仅适用于单 backend，扩容前需迁移 Redis。
+- [ ] 记录复用的 `LLM_API_KEY`、`LLM_BASE_URL` 及新增的 `ARK_VISION_MODEL`、`ARK_VISION_TIMEOUT` 无密钥示例；注明当前限流仅适用于单 backend，扩容前需迁移 Redis。
 - [ ] 运行 `PYTHONPATH=. pytest tests/test_poster_prompt_analyzer.py -q`。
 - [ ] 运行 `PYTHONPATH=. pytest tests/test_prompt_reverse_analysis_api.py -q`。
 - [ ] 运行 `PYTHONPATH=. pytest tests -q`，确认所有 HTTP 测试均是假客户端。

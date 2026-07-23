@@ -178,9 +178,8 @@ LLM_API_KEY=你的火山引擎API密钥
 IMAGE_API_KEY=你的Gemini密钥
 
 # ===== 海报提示词逆向分析（火山方舟）=====
-ARK_API_KEY=你的火山方舟API密钥
+# API Key 和 Base URL 复用 LLM_API_KEY、LLM_BASE_URL
 ARK_VISION_MODEL=ep-你的Doubao-Seed-2.1-Pro推理接入点ID
-ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
 ARK_VISION_TIMEOUT=120
 
 # ===== CORS =====
