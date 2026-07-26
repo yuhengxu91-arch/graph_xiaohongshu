@@ -34,6 +34,7 @@ class BatchTask(Base):
 
     # 共享生成配置（所有子任务继承此配置）
     shared_config = Column(JSON, nullable=False, default=dict)
+    access_token_hash = Column(String(128), nullable=True, index=True)
     # 共享配置结构示例:
     # {
     #   "mode": "custom" | "template",
@@ -85,6 +86,12 @@ class BatchTaskItem(Base):
 
     # 重试计数
     retry_count = Column(Integer, nullable=False, default=0)
+
+    # 自动降级结果
+    degraded = Column(Boolean, nullable=False, default=False)
+    requested_model_name = Column(String(100), nullable=True)
+    actual_model_name = Column(String(100), nullable=True)
+    fallback_attempts = Column(Integer, nullable=False, default=0)
 
     # 时间戳
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)

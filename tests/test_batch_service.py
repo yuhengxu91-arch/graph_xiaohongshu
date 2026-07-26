@@ -2,7 +2,17 @@ import asyncio
 import unittest
 from unittest.mock import AsyncMock, patch
 
+from app.models.batch_task import BatchTask, BatchTaskItem
 from app.services.batch_service import BatchService, _tasks
+
+
+class BatchFallbackModelTests(unittest.TestCase):
+    def test_batch_models_declare_fallback_tracking_fields(self):
+        self.assertTrue(hasattr(BatchTask, "access_token_hash"))
+        self.assertTrue(hasattr(BatchTaskItem, "degraded"))
+        self.assertTrue(hasattr(BatchTaskItem, "requested_model_name"))
+        self.assertTrue(hasattr(BatchTaskItem, "actual_model_name"))
+        self.assertTrue(hasattr(BatchTaskItem, "fallback_attempts"))
 
 
 class BatchServiceTemplateTests(unittest.IsolatedAsyncioTestCase):

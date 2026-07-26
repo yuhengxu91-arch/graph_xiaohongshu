@@ -1,7 +1,63 @@
+import importlib
 import unittest
+import uuid
 
 from tests.test_poster_service import FakeAsyncClient, FakeResponse
+from app.models.image_model import ImageModelConfig
+from app.services.image_model_service import ImageModelService
 from app.services.poster_service import PosterService
+
+poster_service_module = importlib.import_module("app.services.poster_service")
+
+
+class ImageModelFallbackConfigTests(unittest.TestCase):
+    def setUp(self):
+        self.service = ImageModelService()
+
+    def test_model_declares_fallback_configuration_fields(self):
+        self.assertTrue(hasattr(ImageModelConfig, "fallback_enabled"))
+        self.assertTrue(hasattr(ImageModelConfig, "fallback_priority"))
+        self.assertTrue(hasattr(ImageModelConfig, "capabilities"))
+
+    def test_enabled_fallback_requires_positive_priority(self):
+        config = ImageModelConfig(
+            name="备用模型",
+            provider_type="openai_image",
+            base_url="https://images.example.test",
+            model_name="image-model",
+            api_key="test-secret-value",
+            fallback_enabled=True,
+            fallback_priority=0,
+            capabilities={"text_to_image": True, "aspect_ratios": []},
+        )
+
+        with self.assertRaisesRegex(ValueError, "降级优先级"):
+            self.service._validate_config(config)
+
+    def test_safe_serialization_includes_fallback_capabilities_without_real_key(self):
+        config = ImageModelConfig(
+            id=uuid.uuid4(),
+            name="备用模型",
+            provider_type="openai_image",
+            base_url="https://images.example.test",
+            model_name="image-model",
+            api_key="test-secret-value",
+            fallback_enabled=True,
+            fallback_priority=2,
+            capabilities={
+                "text_to_image": True,
+                "single_reference": False,
+                "aspect_ratios": ["1:1", "3:4"],
+            },
+        )
+
+        serialized = self.service.serialize(config)
+
+        self.assertTrue(serialized["fallback_enabled"])
+        self.assertEqual(serialized["fallback_priority"], 2)
+        self.assertEqual(serialized["capabilities"], config.capabilities)
+        self.assertNotEqual(serialized["api_key"], config.api_key)
+        self.assertNotIn(config.api_key, repr(serialized))
 
 
 class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
@@ -19,7 +75,7 @@ class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         from unittest.mock import patch
 
-        with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
             image = await service._call_ai_image_api(
                 "生成一张海报",
                 provider_override="doubao",
@@ -43,7 +99,7 @@ class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         from unittest.mock import patch
 
-        with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
             image = await service._call_ai_image_api(
                 "把日期改成 7月9日，其他保持一致",
                 input_image_base64="data:image/png;base64,aW1hZ2UtYnl0ZXM=",
@@ -71,7 +127,7 @@ class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
 
         from unittest.mock import patch
 
-        with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
             image = await service._call_ai_image_api(
                 "把图1和图2融合成一张海报",
                 input_images_base64=[

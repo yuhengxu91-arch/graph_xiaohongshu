@@ -5,7 +5,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, Column, DateTime, Integer, String, Text
+from sqlalchemy import JSON, Boolean, Column, DateTime, Integer, String, Text
 from sqlalchemy.dialects.postgresql import UUID
 
 from app.core.db import Base
@@ -25,6 +25,9 @@ class ImageModelConfig(Base):
     is_active = Column(Boolean, default=True, index=True)
     is_default = Column(Boolean, default=False, index=True)
     sort_order = Column(Integer, default=0, index=True)
+    fallback_enabled = Column(Boolean, nullable=False, default=False, index=True)
+    fallback_priority = Column(Integer, nullable=True, index=True)
+    capabilities = Column(JSON, nullable=False, default=dict)
     created_at = Column(DateTime(timezone=True), default=datetime.utcnow)
     updated_at = Column(DateTime(timezone=True), default=datetime.utcnow, onupdate=datetime.utcnow)
 

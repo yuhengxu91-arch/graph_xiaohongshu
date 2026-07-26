@@ -79,6 +79,9 @@ class ImageModelService:
             is_active=bool(data.get("is_active", True)),
             is_default=bool(data.get("is_default", False)),
             sort_order=int(data.get("sort_order") or 0),
+            fallback_enabled=bool(data.get("fallback_enabled", False)),
+            fallback_priority=self._optional_int(data.get("fallback_priority")),
+            capabilities=dict(data.get("capabilities") or {}),
         )
         if config.is_default:
             config.is_active = True
@@ -112,10 +115,16 @@ class ImageModelService:
         for field in ["is_active", "is_default"]:
             if field in data and data[field] is not None:
                 setattr(config, field, bool(data[field]))
+        if "fallback_enabled" in data and data["fallback_enabled"] is not None:
+            config.fallback_enabled = bool(data["fallback_enabled"])
         if config.is_default:
             config.is_active = True
         if "sort_order" in data and data["sort_order"] is not None:
             config.sort_order = int(data["sort_order"])
+        if "fallback_priority" in data:
+            config.fallback_priority = self._optional_int(data["fallback_priority"])
+        if "capabilities" in data and data["capabilities"] is not None:
+            config.capabilities = dict(data["capabilities"])
         if config.is_default:
             await self._clear_default(db, except_id=config.id)
 
@@ -162,6 +171,9 @@ class ImageModelService:
             "is_active": bool(config.is_active),
             "is_default": bool(config.is_default),
             "sort_order": int(config.sort_order or 0),
+            "fallback_enabled": bool(config.fallback_enabled),
+            "fallback_priority": config.fallback_priority,
+            "capabilities": dict(config.capabilities or {}),
             "created_at": config.created_at.isoformat() if config.created_at else None,
             "updated_at": config.updated_at.isoformat() if config.updated_at else None,
         }
@@ -196,6 +208,11 @@ class ImageModelService:
             raise ValueError(f"不支持的模型类型: {provider_type}")
         return value
 
+    def _optional_int(self, value: Any) -> Optional[int]:
+        if value is None or value == "":
+            return None
+        return int(value)
+
     def _validate_config(self, config: ImageModelConfig) -> None:
         if not config.name:
             raise ValueError("模型名称不能为空")
@@ -207,6 +224,10 @@ class ImageModelService:
             raise ValueError("模型名称/Model 不能为空")
         if not config.api_key:
             raise ValueError("API Key 不能为空")
+        if config.fallback_enabled and (
+            config.fallback_priority is None or config.fallback_priority <= 0
+        ):
+            raise ValueError("启用备用模型时，降级优先级必须为正整数")
 
 
 image_model_service = ImageModelService()

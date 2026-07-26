@@ -36,6 +36,43 @@ async_session_factory = async_sessionmaker(
 Base = declarative_base()
 
 
+def _postgres_upgrade_statements() -> tuple[str, ...]:
+    """返回 PostgreSQL 旧库升级所需的幂等 SQL。"""
+    return (
+        "ALTER TABLE users "
+        "ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE users "
+        "ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE",
+        "ALTER TABLE user_preferences "
+        "ADD COLUMN IF NOT EXISTS image_model_config_id UUID",
+        "ALTER TABLE image_model_configs "
+        "ADD COLUMN IF NOT EXISTS fallback_enabled BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE image_model_configs "
+        "ADD COLUMN IF NOT EXISTS fallback_priority INTEGER",
+        "ALTER TABLE image_model_configs "
+        "ADD COLUMN IF NOT EXISTS capabilities JSON NOT NULL DEFAULT '{}'::json",
+        "ALTER TABLE batch_tasks "
+        "ADD COLUMN IF NOT EXISTS access_token_hash VARCHAR(128)",
+        "ALTER TABLE batch_task_items "
+        "ADD COLUMN IF NOT EXISTS degraded BOOLEAN NOT NULL DEFAULT FALSE",
+        "ALTER TABLE batch_task_items "
+        "ADD COLUMN IF NOT EXISTS requested_model_name VARCHAR(100)",
+        "ALTER TABLE batch_task_items "
+        "ADD COLUMN IF NOT EXISTS actual_model_name VARCHAR(100)",
+        "ALTER TABLE batch_task_items "
+        "ADD COLUMN IF NOT EXISTS fallback_attempts INTEGER NOT NULL DEFAULT 0",
+        """
+        UPDATE batch_tasks
+        SET shared_config = (
+            shared_config::jsonb
+            #- '{image_model_config,api_key}'
+            #- '{image_model_config,base_url}'
+        )::json
+        WHERE shared_config::jsonb #> '{image_model_config}' IS NOT NULL
+        """,
+    )
+
+
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
     """
     获取异步数据库会话
@@ -61,19 +98,9 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
         if engine.dialect.name == "postgresql":
-            await conn.execute(text(
-                "ALTER TABLE users "
-                "ADD COLUMN IF NOT EXISTS is_admin BOOLEAN NOT NULL DEFAULT FALSE"
-            ))
-            await conn.execute(text(
-                "ALTER TABLE users "
-                "ADD COLUMN IF NOT EXISTS is_active BOOLEAN NOT NULL DEFAULT TRUE"
-            ))
+            for statement in _postgres_upgrade_statements():
+                await conn.execute(text(statement))
             await _bootstrap_admin_role(conn)
-            await conn.execute(text(
-                "ALTER TABLE user_preferences "
-                "ADD COLUMN IF NOT EXISTS image_model_config_id UUID"
-            ))
     print("[DB] Database initialized")
 
 
