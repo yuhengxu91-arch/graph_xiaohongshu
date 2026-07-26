@@ -354,6 +354,7 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
             poster_api,
             "_prepare_sync_generation",
             AsyncMock(return_value={
+                "user_id": None,
                 "brand_kit": brand_kit,
                 "model_runtime": {
                     "provider_override": None,
@@ -400,6 +401,7 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
             poster_api,
             "_prepare_sync_generation",
             AsyncMock(return_value={
+                "user_id": None,
                 "brand_kit": None,
                 "model_runtime": {
                     "provider_override": None,
@@ -593,6 +595,16 @@ class ObservableRequestSession:
         self.transaction_active = False
 
 
+class RealRollbackAsyncSession:
+    def __init__(self, sync_session):
+        self.sync_session = sync_session
+        self.rollback_done = False
+
+    async def rollback(self):
+        self.sync_session.rollback()
+        self.rollback_done = True
+
+
 class IndependentSaveSession:
     def __init__(self):
         self.commit = AsyncMock()
@@ -610,6 +622,97 @@ class AsyncSessionContext:
 
 
 class PosterApiSessionLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_real_sqlalchemy_user_is_not_reloaded_after_request_rollback(self):
+        from sqlalchemy import create_engine, event, inspect
+        from sqlalchemy.orm import Session
+
+        from app.api.v1 import poster as poster_api
+        from app.models.user import User
+
+        engine = create_engine("sqlite:///:memory:")
+        User.__table__.create(engine)
+        sync_session = Session(engine)
+        user = User(username="rollback-user", password_hash="hash")
+        sync_session.add(user)
+        sync_session.commit()
+        expected_user_id = user.id
+        request_db = RealRollbackAsyncSession(sync_session)
+        save_db = IndependentSaveSession()
+        model_ref = ImageModelRef(
+            source="builtin",
+            display_name="豆包 Seedream",
+            provider="doubao",
+        )
+        response = {
+            "success": True,
+            "image_url": "/static/custom.png",
+            "prompt_used": "p",
+            "aspect_ratio": "3:4",
+            "width": 1080,
+            "height": 1440,
+            "mode": "custom",
+        }
+        saved_user_ids = []
+
+        def reject_request_session_reload(
+            connection,
+            cursor,
+            statement,
+            parameters,
+            context,
+            executemany,
+        ):
+            if request_db.rollback_done and statement.lstrip().upper().startswith("SELECT"):
+                raise AssertionError("生成后不得从请求会话重新加载 current_user")
+
+        async def generate(**kwargs):
+            self.assertIn("id", inspect(user).expired_attributes)
+            return response
+
+        async def save_generation(db, **kwargs):
+            self.assertIs(db, save_db)
+            saved_user_ids.append(kwargs["user_id"])
+
+        event.listen(engine, "before_cursor_execute", reject_request_session_reload)
+        try:
+            with patch.object(poster_api, "_get_user_provider", AsyncMock(return_value=None)):
+                with patch.object(poster_api, "_get_user_model_ref", AsyncMock(return_value=model_ref)):
+                    with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
+                        with patch.object(
+                            poster_api,
+                            "_resolve_model_runtime",
+                            AsyncMock(return_value={
+                                "provider_override": "doubao",
+                                "image_model_config": None,
+                            }),
+                        ):
+                            with patch.object(
+                                poster_api.poster_service,
+                                "generate_custom",
+                                AsyncMock(side_effect=generate),
+                            ):
+                                with patch.object(
+                                    poster_api.gallery_service,
+                                    "create_generation_record",
+                                    AsyncMock(side_effect=save_generation),
+                                ):
+                                    with patch.object(
+                                        poster_api,
+                                        "async_session_factory",
+                                        MagicMock(return_value=AsyncSessionContext(save_db)),
+                                    ):
+                                        await poster_api.generate_custom(
+                                            poster_api.CustomGenerateRequest(prompt="测试"),
+                                            current_user=user,
+                                            db=request_db,
+                                        )
+        finally:
+            event.remove(engine, "before_cursor_execute", reject_request_session_reload)
+            sync_session.close()
+            engine.dispose()
+
+        self.assertEqual(saved_user_ids, [expected_user_id])
+
     async def test_public_builtin_and_default_contexts_release_request_transaction_before_resolution(self):
         from app.api.v1 import poster as poster_api
 
@@ -706,6 +809,7 @@ class PosterApiSessionLifecycleTests(unittest.IsolatedAsyncioTestCase):
         from app.services import template_service as template_service_module
 
         context = {
+            "user_id": None,
             "brand_kit": None,
             "model_runtime": {
                 "provider_override": "doubao",

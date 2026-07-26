@@ -101,14 +101,14 @@ class SalesSyncResponse(BaseModel):
 
 async def _auto_save_generation(
     *,
-    current_user: Optional[User],
+    user_id: Optional[Any],
     source_mode: str,
     result: Dict[str, Any],
     request_payload: Dict[str, Any],
     template_id: Optional[Any] = None,
 ) -> None:
     """用独立短会话保存生成结果及模板使用次数。"""
-    should_save_gallery = bool(current_user and result.get("success"))
+    should_save_gallery = bool(user_id and result.get("success"))
     if not should_save_gallery and template_id is None:
         return
 
@@ -125,14 +125,14 @@ async def _auto_save_generation(
             if source_mode == "export_all":
                 await gallery_service.create_export_all_records(
                     save_db,
-                    user_id=current_user.id,
+                    user_id=user_id,
                     export_result=result,
                     request_payload=request_payload,
                 )
             else:
                 await gallery_service.create_generation_record(
                     save_db,
-                    user_id=current_user.id,
+                    user_id=user_id,
                     source_mode=source_mode,
                     generation_result=result,
                     request_payload=request_payload,
@@ -203,6 +203,7 @@ async def _prepare_sync_generation(
     include_brand: bool = False,
 ) -> Dict[str, Any]:
     """读取请求级配置后释放请求连接，再解析本次生成所需运行时配置。"""
+    user_id = user.id if user is not None else None
     brand_kit = None
     if include_brand:
         brand_model = await _get_user_brand_kit(db, user)
@@ -216,6 +217,7 @@ async def _prepare_sync_generation(
     await db.rollback()
     model_runtime = await _resolve_model_runtime(model_ref)
     return {
+        "user_id": user_id,
         "brand_kit": brand_kit,
         "model_runtime": model_runtime,
     }
@@ -367,7 +369,7 @@ async def generate_custom(
                 for index, image in enumerate(req.reference_images)
             ]
         await _auto_save_generation(
-            current_user=current_user,
+            user_id=generation_context["user_id"],
             source_mode="custom",
             result=result,
             request_payload=request_payload,
@@ -429,7 +431,7 @@ async def generate_from_template(
         )
 
         await _auto_save_generation(
-            current_user=current_user,
+            user_id=generation_context["user_id"],
             source_mode="template",
             result=result,
             request_payload=req.model_dump(),
@@ -467,7 +469,7 @@ async def generate_edit(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            current_user=current_user,
+            user_id=generation_context["user_id"],
             source_mode="edit",
             result=result,
             request_payload=req.model_dump(),
@@ -506,7 +508,7 @@ async def generate_style_transfer(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            current_user=current_user,
+            user_id=generation_context["user_id"],
             source_mode="style_transfer",
             result=result,
             request_payload=req.model_dump(),
@@ -560,7 +562,7 @@ async def generate_inpaint(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            current_user=current_user,
+            user_id=generation_context["user_id"],
             source_mode="inpaint",
             result=result,
             request_payload=req.model_dump(),
@@ -593,7 +595,7 @@ async def generate_erase(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            current_user=current_user,
+            user_id=generation_context["user_id"],
             source_mode="erase",
             result=result,
             request_payload=req.model_dump(),
@@ -657,7 +659,7 @@ async def generate_adapt(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            current_user=current_user,
+            user_id=generation_context["user_id"],
             source_mode="adapt",
             result=result,
             request_payload=req.model_dump(),
@@ -692,7 +694,7 @@ async def generate_export_all(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            current_user=current_user,
+            user_id=generation_context["user_id"],
             source_mode="export_all",
             result=result,
             request_payload=req.model_dump(),
