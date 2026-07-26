@@ -83,7 +83,12 @@ SET shared_config = (
 WHERE shared_config::jsonb #> '{image_model_config}' IS NOT NULL
 ```
 
-把 PostgreSQL 升级语句提取为可测试的 `_postgres_upgrade_statements()`。`tests/test_image_fallback_migrations.py` 使用 PostgreSQL dialect 编译并通过 fake connection 执行全部语句，断言包含 `::jsonb`、`::json`、令牌列和全部降级列；SQLite 单元测试只跳过实际执行，不跳过 SQL 生成验证。
+把 PostgreSQL 升级语句提取为可测试的 `_postgres_upgrade_statements()`。`tests/test_image_fallback_migrations.py` 包含两层验证：
+
+1. 使用 PostgreSQL dialect 编译并通过 fake connection 执行全部语句，断言包含 `::jsonb`、`::json`、令牌列和全部降级列。
+2. 使用项目测试 PostgreSQL 开启事务，插入包含 `image_model_config.api_key/base_url`、其他模型字段及其他 `shared_config` 键的任务行，执行升级语句后查询，断言只删除敏感路径；再执行一次证明幂等。覆盖空对象和缺失路径，最后回滚事务。
+
+真实 PostgreSQL 集成测试是发布门槛，不允许用 SQLite 跳过后声称迁移已验证。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -141,6 +146,8 @@ Run: `PYTHONPATH=. pytest tests/test_image_fallback_service.py tests/test_profil
 
 API 层和任务 `shared_config` 只保存 `model_ref` 的字典。先实现“只解析并调用主模型”的兼容路径：后台执行时通过独立 session 将引用解析成短生命周期 runtime config，再调用现有 `PosterService`，本任务暂不启用备用链。内置模型从环境变量解析。切换持久化格式后，现有单张和批量生成测试必须保持全绿。
 
+同步 `app/api/v1/poster.py` 路径在调用 `PosterService` 前通过请求数据库会话解析安全引用，不把 `ImageModelRef` 误传为 runtime config。增加公共模型、内置模型和系统默认三种同步 API 回归测试，本提交仍只调用主模型、不启用降级。
+
 - [ ] **Step 4: 增加密钥不落库测试**
 
 创建任务后递归检查 `shared_config`：
@@ -178,6 +185,9 @@ git commit -m "refactor(images): persist safe model references"
 - 错误码比较对大小写、下划线和短横线归一化。
 - 余额、配额和审核业务码/关键词优先于 HTTP 429。
 - HTTP 200 根级 `error` 走错误表。
+- HTTP 200、无业务错误、无审核信号且无图片数据时抛 retryable 空结果错误。
+- Gemini `finishReason=STOP` 且无审核信号、无图片时允许降级。
+- 无法识别的业务错误默认 `retryable=false`。
 - Gemini `promptFeedback.blockReason`、`safetyRatings`、`SAFETY/PROHIBITED_CONTENT/BLOCKLIST/SPII/IMAGE_SAFETY` 不得当作空图片。
 - 豆包根级 `error`、`data.error`、`item.error` 按规格优先级解析。
 - `CancelledError` 原样传播。
@@ -202,7 +212,9 @@ class ImageGenerationError(RuntimeError):
 
 - [ ] **Step 4: 改造供应商适配器**
 
-适配器成功返回有效 Base64；失败抛 `ImageGenerationError`。移除错误路径中的 `print(response.text)`，改用脱敏 logger。`CancelledError` 不捕获。
+适配器成功返回有效 Base64；失败抛 `ImageGenerationError`。清除本功能涉及的三个供应商调用链中的全部 `print`，包括成功路径 URL、模型地址、提示词片段和错误响应；不得记录 URL/Base URL 或提示词。统一改用脱敏结构化 logger。`CancelledError` 不捕获。
+
+测试同时捕获 logger 和 stdout/stderr，分别覆盖成功、失败、候选跳过路径，断言无 Key、Base URL、完整响应体和提示词片段。
 
 - [ ] **Step 5: 运行测试并提交**
 
@@ -236,6 +248,8 @@ git commit -m "feat(images): classify provider failures"
   - 所有模式检查 `aspect_ratios`
 - 自定义多参考图、模板图片槽、edit、inpaint、erase、style transfer、outpaint、adapt 和 `export_all` 的能力组合均有测试。
 - 能力不匹配候选被跳过。
+- `aspect_ratios=[]` 表示允许供应商自行适配，不能视为不支持全部比例。
+- 能力字段缺失或包含未知能力时，候选默认不参与对应降级。
 - 备用成功返回：
 
 ```python
@@ -329,6 +343,8 @@ git commit -m "feat(images): persist fallback generation status"
 - 匿名任务必须提供正确令牌。
 - 登录用户不能仅凭 UUID 访问匿名任务。
 - 数据库和内存只保存 SHA-256 令牌哈希。
+- 使用 `secrets.token_urlsafe(32)` 生成令牌；不同任务令牌不重复且满足最低长度。
+- 管理员无需匿名令牌即可访问匿名任务的状态、SSE、追加、重试和下载接口。
 - 创建响应只返回一次明文令牌；前端任务上下文 `{ taskId, accessToken }` 只保存在当前组件内存，不写 localStorage/sessionStorage。
 - 状态轮询、模板追加、重试和 fetch 下载均从同一任务上下文构造 `X-Task-Access-Token`。
 - SSE helper 使用 fetch stream 和请求头；现有 UI 继续使用轮询，不创建未使用的 SSE 连接。
@@ -344,7 +360,6 @@ Run: `PYTHONPATH=. pytest tests/test_batch_task_access.py -q`
 ```js
 createBatchTaskContext(response)
 batchTaskHeaders(context)
-countDegradedItems(items)
 ```
 
 `api.js` 中 `getBatchStatus`、`appendTemplateBatchItems`、`retryBatchTask`、`downloadBatchTask` 和 `streamBatchStatus` 都接收任务上下文而不是裸 `taskId`。下载改为带请求头的 fetch/blob。`ResultDisplay` 和 `PanelTemplate` 在当前任务生命周期内持有上下文并传给全部 helper。
@@ -376,7 +391,7 @@ git commit -m "fix(batch): enforce task ownership"
 
 - [ ] **Step 1: 写前后端失败测试**
 
-后端验证只有管理员可写备用配置、优先级必须为正整数、能力只接受白名单字段。把表单 payload 归一化提取为可执行纯函数，测试开关关闭时清空优先级、能力白名单和支持比例；组件再保留一条入口接线回归测试。
+后端验证只有管理员可写备用配置、优先级必须为正整数、能力只接受白名单字段。新增模型按 `provider_type` 获得保守默认能力并有单元测试。把表单 payload 归一化提取为可执行纯函数，测试开关关闭时清空优先级、能力白名单和支持比例；组件再保留一条入口接线回归测试。
 
 - [ ] **Step 2: 运行测试确认失败**
 
