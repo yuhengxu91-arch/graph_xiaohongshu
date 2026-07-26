@@ -1194,7 +1194,6 @@ class PosterService:
         input_images = self._merge_input_images(input_image_base64, input_images_base64)
         is_edit = bool(input_images)
         url = f"{base_url}/v1/images/{'edits' if is_edit else 'generations'}"
-        print(f"[PosterService] {tag} 请求 URL: {url}")
         print(f"[PosterService] {tag} 使用模型: {model}")
         print(f"[PosterService] {tag} 生图尺寸: {size} (aspect_ratio={aspect_ratio or '3:4'})")
 
@@ -1426,7 +1425,6 @@ class PosterService:
             tag = "Gemini"
 
         url = f"{base_url}/v1beta/models/{model}:generateContent"
-        print(f"[PosterService] {tag} 请求 URL: {url}")
         print(f"[PosterService] {tag} 使用模型: {model}")
         print(f"[PosterService] {tag} 生图比例: {aspect_ratio or '3:4'}")
 

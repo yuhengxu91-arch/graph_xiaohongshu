@@ -12,6 +12,10 @@ from app.core.limits import IMAGE_PROMPT_MAX_LENGTH
 from app.dependencies.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.services.brand_service import brand_service
+from app.services.image_fallback_service import (
+    ImageModelRef,
+    resolve_runtime_config_with_session,
+)
 from app.services.image_model_service import image_model_service
 from app.services.poster_service import poster_service
 from app.services.gallery_service import gallery_service
@@ -143,16 +147,15 @@ async def _get_user_brand_kit(
     return await brand_service.get_brand_kit(db, user_id=user.id)
 
 
-async def _get_user_image_model_config(
+async def _get_user_model_ref(
     db: AsyncSession,
     user: Optional[User],
     provider: Optional[str],
-) -> Optional[Dict[str, Any]]:
+) -> ImageModelRef:
     """
-    获取当前应使用的公共图片模型配置。
+    获取当前实际生效的安全模型引用。
 
-    用户显式选择公共模型时优先；若未选择旧版 provider，则使用管理员设定的默认公共模型；
-    都不存在时返回 None，继续走 .env / 旧版 provider 配置。
+    跟随系统时在任务开始前固定为公共默认或当前内置默认，引用本身不含凭据。
     """
     if user:
         selected = await profile_service.get_user_image_model_config(db, user_id=user.id)
@@ -160,12 +163,34 @@ async def _get_user_image_model_config(
             return selected
 
     if provider:
-        return None
+        return image_model_service.model_ref_for_builtin(provider)
 
     default_config = await image_model_service.get_default_config(db)
-    if not default_config:
-        return None
-    return image_model_service.runtime_config(default_config)
+    if default_config:
+        return image_model_service.model_ref_for_config(default_config)
+    return image_model_service.model_ref_for_builtin(poster_service.provider)
+
+
+async def _get_user_image_model_config(
+    db: AsyncSession,
+    user: Optional[User],
+    provider: Optional[str],
+) -> ImageModelRef:
+    """兼容旧内部调用名称，返回值已改为安全引用。"""
+    return await _get_user_model_ref(db, user, provider)
+
+
+async def _resolve_model_runtime(model_ref: ImageModelRef) -> Dict[str, Any]:
+    return await resolve_runtime_config_with_session(model_ref)
+
+
+async def _get_runtime_model_context(
+    db: AsyncSession,
+    user: Optional[User],
+) -> Dict[str, Any]:
+    provider = await _get_user_provider(db, user)
+    model_ref = await _get_user_model_ref(db, user, provider)
+    return await _resolve_model_runtime(model_ref)
 
 
 # ======================== 查询接口 ========================
@@ -291,17 +316,16 @@ async def generate_custom(
     - AI 直接生成完整海报图片
     """
     try:
-        provider = await _get_user_provider(db, current_user)
         brand_kit = await _get_user_brand_kit(db, current_user)
-        image_model_config = await _get_user_image_model_config(db, current_user, provider)
+        model_runtime = await _get_runtime_model_context(db, current_user)
         result = await poster_service.generate_custom(
             prompt=req.prompt,
             style_tags=req.style_tags,
             aspect_ratio=req.aspect_ratio,
             color_tone=req.color_tone,
             reference_images=[image.model_dump() for image in (req.reference_images or [])],
-            provider_override=provider,
-            image_model_config=image_model_config,
+            provider_override=model_runtime.get("provider_override"),
+            image_model_config=model_runtime.get("image_model_config"),
             brand_kit=brand_kit,
         )
         request_payload = req.model_dump()
@@ -339,9 +363,8 @@ async def generate_from_template(
     - AI 基于模板约束生成海报
     """
     try:
-        provider = await _get_user_provider(db, current_user)
         brand_kit = await _get_user_brand_kit(db, current_user)
-        image_model_config = await _get_user_image_model_config(db, current_user, provider)
+        model_runtime = await _get_runtime_model_context(db, current_user)
 
         # 统一通过 template_id 从数据库查找（包含个人模板和系统模板）
         from app.services.template_service import template_service
@@ -360,8 +383,8 @@ async def generate_from_template(
             style_tag=req.style_tag,
             color_option=req.color_option,
             aspect_ratio=req.aspect_ratio,
-            provider_override=provider,
-            image_model_config=image_model_config,
+            provider_override=model_runtime.get("provider_override"),
+            image_model_config=model_runtime.get("image_model_config"),
             brand_kit=brand_kit,
         )
         
@@ -397,14 +420,13 @@ async def generate_edit(
     - AI 根据指令修改图片
     """
     try:
-        provider = await _get_user_provider(db, current_user)
-        image_model_config = await _get_user_image_model_config(db, current_user, provider)
+        model_runtime = await _get_runtime_model_context(db, current_user)
         result = await poster_service.generate_edit(
             image_base64=req.image_base64,
             edit_prompt=req.edit_prompt,
             aspect_ratio=req.aspect_ratio,
-            provider_override=provider,
-            image_model_config=image_model_config,
+            provider_override=model_runtime.get("provider_override"),
+            image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
             db=db,
@@ -436,15 +458,14 @@ async def generate_style_transfer(
     - AI 将图片转换为目标风格
     """
     try:
-        provider = await _get_user_provider(db, current_user)
-        image_model_config = await _get_user_image_model_config(db, current_user, provider)
+        model_runtime = await _get_runtime_model_context(db, current_user)
         result = await poster_service.generate_style_transfer(
             image_base64=req.image_base64,
             style_tags=req.style_tags,
             strength=req.strength,
             aspect_ratio=req.aspect_ratio,
-            provider_override=provider,
-            image_model_config=image_model_config,
+            provider_override=model_runtime.get("provider_override"),
+            image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
             db=db,
@@ -491,15 +512,14 @@ async def generate_inpaint(
     - AI 仅修改遮罩区域，保留其余部分不变
     """
     try:
-        provider = await _get_user_provider(db, current_user)
-        image_model_config = await _get_user_image_model_config(db, current_user, provider)
+        model_runtime = await _get_runtime_model_context(db, current_user)
         result = await poster_service.generate_inpaint(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
             inpaint_prompt=req.inpaint_prompt,
             aspect_ratio=req.aspect_ratio,
-            provider_override=provider,
-            image_model_config=image_model_config,
+            provider_override=model_runtime.get("provider_override"),
+            image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
             db=db,
@@ -527,13 +547,12 @@ async def generate_erase(
     - 无需提示词
     """
     try:
-        provider = await _get_user_provider(db, current_user)
-        image_model_config = await _get_user_image_model_config(db, current_user, provider)
+        model_runtime = await _get_runtime_model_context(db, current_user)
         result = await poster_service.generate_erase(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
-            provider_override=provider,
-            image_model_config=image_model_config,
+            provider_override=model_runtime.get("provider_override"),
+            image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
             db=db,
@@ -589,16 +608,15 @@ async def generate_adapt(
     - AI 扩图模式下可提供补充提示词以优化扩展区域
     """
     try:
-        provider = await _get_user_provider(db, current_user)
-        image_model_config = await _get_user_image_model_config(db, current_user, provider)
+        model_runtime = await _get_runtime_model_context(db, current_user)
         result = await poster_service.generate_adapt(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
             target_ratio=req.target_ratio,
             strategy=req.strategy,
             outpaint_prompt=req.outpaint_prompt,
-            provider_override=provider,
-            image_model_config=image_model_config,
+            provider_override=model_runtime.get("provider_override"),
+            image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
             db=db,
@@ -626,15 +644,14 @@ async def generate_export_all(
     - 返回多张适配后的图片
     """
     try:
-        provider = await _get_user_provider(db, current_user)
-        image_model_config = await _get_user_image_model_config(db, current_user, provider)
+        model_runtime = await _get_runtime_model_context(db, current_user)
         result = await poster_service.generate_export_all(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
             strategy=req.strategy,
             outpaint_prompt=req.outpaint_prompt,
-            provider_override=provider,
-            image_model_config=image_model_config,
+            provider_override=model_runtime.get("provider_override"),
+            image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
             db=db,

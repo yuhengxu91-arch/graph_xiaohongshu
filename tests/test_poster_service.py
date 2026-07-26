@@ -1,4 +1,5 @@
 import base64
+import importlib
 import io
 import os
 import tempfile
@@ -9,6 +10,9 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 from app.services.poster_service import PosterService
+from app.services.image_fallback_service import ImageModelRef
+
+poster_service_module = importlib.import_module("app.services.poster_service")
 
 
 class FakeResponse:
@@ -66,7 +70,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.dict(os.environ, {"LLM_API_KEY": "test-key", "LLM_BASE_URL": "https://example.test/api/v3"}):
-            with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+            with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
                 image = await service._call_doubao_image_api("生成一张海报")
 
         self.assertEqual(image, "nested-image")
@@ -81,7 +85,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.dict(os.environ, {"LLM_API_KEY": "test-key", "LLM_BASE_URL": "https://example.test/api/v3"}):
-            with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+            with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
                 image = await service._call_doubao_image_api("生成一张海报", aspect_ratio="9:16")
 
         self.assertEqual(image, "portrait-image")
@@ -100,7 +104,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
             "name": "第三方生图",
         }
 
-        with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
             image = await service._call_ai_image_api(
                 "模板提示词",
                 image_model_config=image_model_config,
@@ -110,6 +114,30 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(image, "third-party-image")
         self.assertEqual(client.post_payload["size"], "1536x2048")
 
+    async def test_dynamic_openai_image_does_not_log_base_url_or_api_key(self):
+        service = PosterService()
+        client = FakeAsyncClient(
+            post_response=FakeResponse({"data": [{"b64_json": "third-party-image"}]}),
+        )
+        image_model_config = {
+            "provider_type": "openai_image",
+            "base_url": "https://private-provider.example.test",
+            "model_name": "private-model",
+            "api_key": "secret-value",
+            "name": "私有生图",
+        }
+
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
+            with patch("builtins.print") as print_mock:
+                await service._call_ai_image_api(
+                    "模板提示词",
+                    image_model_config=image_model_config,
+                )
+
+        log_output = " ".join(str(call) for call in print_mock.call_args_list)
+        self.assertNotIn("private-provider.example.test", log_output)
+        self.assertNotIn("secret-value", log_output)
+
     async def test_call_ai_image_api_passes_aspect_ratio_to_doubao(self):
         service = PosterService()
         service.provider = "doubao"
@@ -118,7 +146,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.dict(os.environ, {"LLM_API_KEY": "test-key", "LLM_BASE_URL": "https://example.test/api/v3"}):
-            with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+            with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
                 image = await service._call_ai_image_api(
                     "模板提示词",
                     aspect_ratio="3:4",
@@ -155,7 +183,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
         )
 
         with patch.dict(os.environ, {"LLM_API_KEY": "test-key", "LLM_BASE_URL": "https://example.test/api/v3"}):
-            with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+            with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
                 image = await service._call_doubao_image_api("生成一张海报")
 
         self.assertEqual(image, base64.b64encode(raw_image).decode("utf-8"))
@@ -187,7 +215,7 @@ class PosterServiceGeminiTests(unittest.IsolatedAsyncioTestCase):
             )
         )
 
-        with patch("app.services.poster_service.httpx.AsyncClient", return_value=client):
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
             image = await service._call_gemini_api("生成一张海报", use_changhuai=True)
 
         self.assertEqual(image, "proxy-image")
@@ -324,8 +352,11 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
         }
         brand_service_mock = SimpleNamespace(get_brand_kit=AsyncMock(return_value=brand_kit))
 
-        with patch.object(poster_api.profile_service, "get_user_image_provider", AsyncMock(return_value=None)):
-            with patch.object(poster_api, "_get_user_image_model_config", AsyncMock(return_value=None)):
+        with patch.object(
+            poster_api,
+            "_get_runtime_model_context",
+            AsyncMock(return_value={"provider_override": None, "image_model_config": None}),
+        ):
                 with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response_payload)) as generate_mock:
                     with patch.object(poster_api.gallery_service, "create_generation_record", AsyncMock()):
                         with patch("app.api.v1.poster.brand_service", brand_service_mock, create=True):
@@ -363,9 +394,12 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
             ],
         )
 
-        with patch.object(poster_api.profile_service, "get_user_image_provider", AsyncMock(return_value=None)):
-            with patch.object(poster_api, "_get_user_image_model_config", AsyncMock(return_value=None)):
-                with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
+        with patch.object(
+            poster_api,
+            "_get_runtime_model_context",
+            AsyncMock(return_value={"provider_override": None, "image_model_config": None}),
+        ):
+            with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
                     with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response_payload)) as generate_mock:
                         with patch.object(poster_api.gallery_service, "create_generation_record", AsyncMock(side_effect=capture_generation_record)):
                             await poster_api.generate_custom(
@@ -384,6 +418,163 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
             [{"name": "图1", "has_image": True}, {"name": "图2", "has_image": True}],
         )
         self.assertNotIn("aW1hZ2Ux", str(saved_payloads[0]))
+
+
+class PosterApiSafeModelReferenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_selected_public_model_resolves_safe_reference_before_generation(self):
+        from app.api.v1 import poster as poster_api
+
+        config_id = uuid4()
+        model_ref = ImageModelRef(
+            source="config",
+            display_name="公共模型",
+            config_id=config_id,
+        )
+        runtime = {
+            "provider_override": None,
+            "image_model_config": {
+                "provider_type": "openai_image",
+                "api_key": "secret-value",
+                "base_url": "https://images.example.test",
+                "model_name": "gpt-image-2",
+            },
+        }
+        response = {
+            "success": True,
+            "image_url": "/static/public.png",
+            "prompt_used": "p",
+            "aspect_ratio": "3:4",
+            "width": 1080,
+            "height": 1440,
+            "mode": "custom",
+        }
+
+        with patch.object(poster_api, "_get_user_provider", AsyncMock(return_value=None)):
+            with patch.object(poster_api, "_get_user_model_ref", AsyncMock(return_value=model_ref)):
+                with patch.object(poster_api, "_resolve_model_runtime", AsyncMock(return_value=runtime)):
+                    with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
+                        with patch.object(poster_api, "_auto_save_generation", AsyncMock()):
+                            with patch.object(
+                                poster_api.poster_service,
+                                "generate_custom",
+                                AsyncMock(return_value=response),
+                            ) as generate:
+                                await poster_api.generate_custom(
+                                    poster_api.CustomGenerateRequest(prompt="测试"),
+                                    current_user=SimpleNamespace(id=uuid4()),
+                                    db=object(),
+                                )
+
+        self.assertEqual(generate.await_args.kwargs["image_model_config"]["api_key"], "secret-value")
+        self.assertIsNone(generate.await_args.kwargs["provider_override"])
+
+    async def test_builtin_model_uses_provider_without_runtime_secret(self):
+        from app.api.v1 import poster as poster_api
+
+        model_ref = ImageModelRef(
+            source="builtin",
+            display_name="豆包 Seedream",
+            provider="doubao",
+        )
+        runtime = {"provider_override": "doubao", "image_model_config": None}
+        response = {
+            "success": True,
+            "image_url": "/static/builtin.png",
+            "prompt_used": "p",
+            "aspect_ratio": "3:4",
+            "width": 1080,
+            "height": 1440,
+            "mode": "custom",
+        }
+
+        with patch.object(poster_api, "_get_user_provider", AsyncMock(return_value=None)):
+            with patch.object(poster_api, "_get_user_model_ref", AsyncMock(return_value=model_ref)):
+                with patch.object(poster_api, "_resolve_model_runtime", AsyncMock(return_value=runtime)):
+                    with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
+                        with patch.object(poster_api, "_auto_save_generation", AsyncMock()):
+                            with patch.object(
+                                poster_api.poster_service,
+                                "generate_custom",
+                                AsyncMock(return_value=response),
+                            ) as generate:
+                                await poster_api.generate_custom(
+                                    poster_api.CustomGenerateRequest(prompt="测试"),
+                                    current_user=SimpleNamespace(id=uuid4()),
+                                    db=object(),
+                                )
+
+        self.assertEqual(generate.await_args.kwargs["provider_override"], "doubao")
+        self.assertIsNone(generate.await_args.kwargs["image_model_config"])
+
+    async def test_system_default_is_materialized_as_actual_safe_reference(self):
+        from app.api.v1 import poster as poster_api
+
+        default_config = SimpleNamespace(id=uuid4(), name="系统公共默认")
+        with patch.object(
+            poster_api.image_model_service,
+            "get_default_config",
+            AsyncMock(return_value=default_config),
+        ):
+            model_ref = await poster_api._get_user_model_ref(
+                object(),
+                user=None,
+                provider=None,
+            )
+
+        self.assertEqual(model_ref.source, "config")
+        self.assertEqual(model_ref.config_id, default_config.id)
+        self.assertNotIn("api_key", model_ref.to_dict())
+
+    async def test_system_default_reference_is_resolved_for_generation(self):
+        from app.api.v1 import poster as poster_api
+
+        default_config = SimpleNamespace(id=uuid4(), name="系统公共默认")
+        runtime = {
+            "provider_override": None,
+            "image_model_config": {
+                "provider_type": "openai_image",
+                "api_key": "runtime-only-secret",
+                "base_url": "https://images.example.test",
+                "model_name": "gpt-image-2",
+            },
+        }
+        response = {
+            "success": True,
+            "image_url": "/static/default.png",
+            "prompt_used": "p",
+            "aspect_ratio": "3:4",
+            "width": 1080,
+            "height": 1440,
+            "mode": "custom",
+        }
+
+        with patch.object(poster_api, "_get_user_provider", AsyncMock(return_value=None)):
+            with patch.object(
+                poster_api.image_model_service,
+                "get_default_config",
+                AsyncMock(return_value=default_config),
+            ):
+                with patch.object(
+                    poster_api,
+                    "_resolve_model_runtime",
+                    AsyncMock(return_value=runtime),
+                ) as resolve:
+                    with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
+                        with patch.object(poster_api, "_auto_save_generation", AsyncMock()):
+                            with patch.object(
+                                poster_api.poster_service,
+                                "generate_custom",
+                                AsyncMock(return_value=response),
+                            ):
+                                await poster_api.generate_custom(
+                                    poster_api.CustomGenerateRequest(prompt="测试"),
+                                    current_user=None,
+                                    db=object(),
+                                )
+
+        resolved_ref = resolve.await_args.args[0]
+        self.assertEqual(resolved_ref.source, "config")
+        self.assertEqual(resolved_ref.config_id, default_config.id)
 
 
 if __name__ == "__main__":

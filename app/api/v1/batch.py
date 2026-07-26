@@ -18,6 +18,7 @@ from app.models.user import User
 from app.services.brand_service import brand_service
 from app.services.batch_service import batch_service
 from app.services.image_model_service import image_model_service
+from app.services.poster_service import poster_service
 from app.services.profile_service import profile_service
 
 router = APIRouter(prefix="/poster/batch", tags=["Poster Batch"])
@@ -140,7 +141,7 @@ async def _get_runtime_image_context(
 ) -> Dict[str, Any]:
     brand_kit = None
     image_provider = None
-    image_model_config = None
+    model_ref = None
     if current_user:
         kit = await brand_service.get_brand_kit(db, user_id=current_user.id)
         if kit:
@@ -149,20 +150,26 @@ async def _get_runtime_image_context(
             db,
             user_id=current_user.id,
         )
-        image_model_config = await profile_service.get_user_image_model_config(
+        model_ref = await profile_service.get_user_image_model_config(
             db,
             user_id=current_user.id,
         )
 
-    if not image_provider and not image_model_config:
+    if not model_ref and image_provider:
+        model_ref = image_model_service.model_ref_for_builtin(image_provider)
+
+    if not model_ref:
         default_model = await image_model_service.get_default_config(db)
         if default_model:
-            image_model_config = image_model_service.runtime_config(default_model)
+            model_ref = image_model_service.model_ref_for_config(default_model)
+        else:
+            model_ref = image_model_service.model_ref_for_builtin(
+                poster_service.provider
+            )
 
     return {
         "brand_kit": brand_kit,
-        "image_provider": image_provider,
-        "image_model_config": image_model_config,
+        "model_ref": model_ref.to_dict(),
     }
 
 

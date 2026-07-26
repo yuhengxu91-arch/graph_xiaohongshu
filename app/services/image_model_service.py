@@ -188,6 +188,68 @@ class ImageModelService:
             "api_key": config.api_key,
         }
 
+    def model_ref_for_config(self, config: ImageModelConfig):
+        """创建可安全持久化的公共模型引用。"""
+        from app.services.image_fallback_service import ImageModelRef
+
+        return ImageModelRef(
+            source="config",
+            display_name=config.name,
+            config_id=config.id,
+        )
+
+    def model_ref_for_builtin(self, provider: str):
+        """创建可安全持久化的内置模型引用。"""
+        from app.services.image_fallback_service import BUILTIN_MODEL_NAMES, ImageModelRef
+
+        if provider not in BUILTIN_MODEL_NAMES:
+            raise ValueError(f"不支持的内置图片模型: {provider}")
+        return ImageModelRef(
+            source="builtin",
+            display_name=BUILTIN_MODEL_NAMES[provider],
+            provider=provider,
+        )
+
+    async def resolve_runtime_config(self, db: AsyncSession, model_ref):
+        """按安全引用读取执行期配置。"""
+        from app.services.image_fallback_service import resolve_runtime_config
+
+        return await resolve_runtime_config(db, model_ref)
+
+    async def list_fallback_model_refs(
+        self,
+        db: AsyncSession,
+        *,
+        primary_ref,
+        required_capabilities: Optional[dict[str, Any]] = None,
+    ) -> list:
+        """实时查询当前可用备用模型；本阶段只提供候选，不执行自动降级。"""
+        configs = await self.list_configs(db, include_inactive=True)
+        eligible = [
+            config
+            for config in configs
+            if bool(config.is_active)
+            and bool(config.fallback_enabled)
+            and config.fallback_priority is not None
+            and config.fallback_priority > 0
+            and not (
+                primary_ref.source == "config"
+                and primary_ref.config_id == config.id
+            )
+            and self._supports_capabilities(
+                config.capabilities or {},
+                required_capabilities or {},
+            )
+        ]
+        eligible.sort(
+            key=lambda config: (
+                config.fallback_priority,
+                int(config.sort_order or 0),
+                config.created_at or datetime.min,
+            )
+        )
+        return [self.model_ref_for_config(config) for config in eligible]
+
     def mask_api_key(self, api_key: str) -> str:
         if not api_key:
             return ""
@@ -228,6 +290,21 @@ class ImageModelService:
             config.fallback_priority is None or config.fallback_priority <= 0
         ):
             raise ValueError("启用备用模型时，降级优先级必须为正整数")
+
+    def _supports_capabilities(
+        self,
+        available: dict[str, Any],
+        required: dict[str, Any],
+    ) -> bool:
+        for name, required_value in required.items():
+            if name == "aspect_ratio":
+                ratios = available.get("aspect_ratios") or []
+                if ratios and required_value not in ratios:
+                    return False
+                continue
+            if required_value and not available.get(name, False):
+                return False
+        return True
 
 
 image_model_service = ImageModelService()

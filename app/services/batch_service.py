@@ -14,6 +14,7 @@ from uuid import UUID
 
 from app.core.db import async_session_factory
 from app.models.batch_task import BatchTask, BatchTaskItem
+from app.services.image_fallback_service import resolve_runtime_config_with_session
 from app.services.gallery_service import gallery_service
 from app.services.poster_service import poster_service
 
@@ -50,7 +51,7 @@ class BatchService:
             "success_count": 0,
             "failed_count": 0,
             "running_count": 0,
-            "shared_config": shared_config,
+            "shared_config": self._sanitize_shared_config(shared_config),
             "items": task_items,
             "created_at": datetime.utcnow().isoformat(),
             "started_at": None,
@@ -148,7 +149,7 @@ class BatchService:
             "success_count": 0,
             "failed_count": 0,
             "running_count": 0,
-            "shared_config": shared_config,
+            "shared_config": self._sanitize_shared_config(shared_config),
             "single_mode": mode,
             "items": [item],
             "created_at": datetime.utcnow().isoformat(),
@@ -208,6 +209,7 @@ class BatchService:
             mode = task.get("single_mode")
             params = item["item_params"]
             runtime_input = item.get("runtime_input") or {}
+            model_runtime = await self._resolve_task_runtime_config(config)
 
             if mode == "custom":
                 result = await poster_service.generate_custom(
@@ -216,8 +218,8 @@ class BatchService:
                     aspect_ratio=config.get("aspect_ratio", "3:4"),
                     color_tone=config.get("color_tone"),
                     reference_images=runtime_input.get("reference_images"),
-                    provider_override=config.get("image_provider"),
-                    image_model_config=config.get("image_model_config"),
+                    provider_override=model_runtime.get("provider_override"),
+                    image_model_config=model_runtime.get("image_model_config"),
                     brand_kit=config.get("brand_kit"),
                 )
             elif mode == "edit":
@@ -225,8 +227,8 @@ class BatchService:
                     image_base64=runtime_input.get("image_base64", ""),
                     edit_prompt=params.get("edit_prompt", ""),
                     aspect_ratio=config.get("aspect_ratio", "3:4"),
-                    provider_override=config.get("image_provider"),
-                    image_model_config=config.get("image_model_config"),
+                    provider_override=model_runtime.get("provider_override"),
+                    image_model_config=model_runtime.get("image_model_config"),
                 )
             else:
                 raise RuntimeError(f"不支持的单张生成模式: {mode}")
@@ -414,10 +416,11 @@ class BatchService:
                 )
 
             item["ai_prompt_used"] = enhanced_prompt
+            model_runtime = await self._resolve_task_runtime_config(config)
             image_base64 = await poster_service._call_ai_image_api(
                 enhanced_prompt,
-                provider_override=config.get("image_provider"),
-                image_model_config=config.get("image_model_config"),
+                provider_override=model_runtime.get("provider_override"),
+                image_model_config=model_runtime.get("image_model_config"),
             )
             if not image_base64:
                 raise RuntimeError("AI 图片生成返回空结果")
@@ -458,6 +461,7 @@ class BatchService:
             for key, value in raw_params.items()
             if key not in {"reference_images"} and not key.startswith("_")
         }
+        model_runtime = await self._resolve_task_runtime_config(config)
         result = await poster_service.generate_from_db_template(
             template_config=config.get("template_config", {}),
             template_name=config.get("template_name") or "模板批量生成",
@@ -467,8 +471,8 @@ class BatchService:
             style_tag=config.get("style_tag"),
             color_option=config.get("color_option"),
             aspect_ratio=config.get("aspect_ratio"),
-            provider_override=config.get("image_provider"),
-            image_model_config=config.get("image_model_config"),
+            provider_override=model_runtime.get("provider_override"),
+            image_model_config=model_runtime.get("image_model_config"),
             brand_kit=config.get("brand_kit"),
         )
         if not result.get("success"):
@@ -478,6 +482,36 @@ class BatchService:
         item["ai_prompt_used"] = result.get("prompt_used")
         item["status"] = "success"
         await self._save_batch_output(task, item, config)
+
+    async def _resolve_task_runtime_config(
+        self,
+        config: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """在短数据库会话中解析安全引用，兼容尚未迁移的内存任务。"""
+        model_ref = config.get("model_ref")
+        if model_ref:
+            return await resolve_runtime_config_with_session(model_ref)
+        return {
+            "provider_override": config.get("image_provider"),
+            "image_model_config": config.get("image_model_config"),
+        }
+
+    def _sanitize_shared_config(self, config: Dict[str, Any]) -> Dict[str, Any]:
+        """删除任何可能进入任务持久化的运行时凭据。"""
+        blocked = {"api_key", "base_url", "image_model_config"}
+
+        def sanitize(value: Any) -> Any:
+            if isinstance(value, dict):
+                return {
+                    key: sanitize(item)
+                    for key, item in value.items()
+                    if key not in blocked
+                }
+            if isinstance(value, list):
+                return [sanitize(item) for item in value]
+            return value
+
+        return sanitize(dict(config))
 
     def get_batch_status(self, task_id: str) -> Optional[Dict[str, Any]]:
         """

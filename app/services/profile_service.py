@@ -292,8 +292,8 @@ class ProfileService:
 
     async def get_user_image_model_config(
         self, db: AsyncSession, *, user_id: UUID
-    ) -> Optional[dict[str, Any]]:
-        """查询用户选择的公共图片模型配置，None 表示未选择动态模型。"""
+    ):
+        """查询用户选择的安全公共模型引用，None 表示未选择动态模型。"""
         stmt = select(UserPreference.image_model_config_id).where(
             UserPreference.user_id == user_id
         )
@@ -311,7 +311,7 @@ class ProfileService:
         )
         if not config:
             return None
-        return image_model_service.runtime_config(config)
+        return image_model_service.model_ref_for_config(config)
 
 
 # 模块级单例

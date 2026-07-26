@@ -1,8 +1,11 @@
 import asyncio
+import json
 import unittest
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
 
 from app.models.batch_task import BatchTask, BatchTaskItem
+from app.services.image_fallback_service import ImageModelRef
 from app.services.batch_service import BatchService, _tasks
 
 
@@ -65,6 +68,76 @@ class BatchServiceTemplateTests(unittest.IsolatedAsyncioTestCase):
         status = service.get_batch_status(result["task_id"])
         self.assertEqual(status["status"], "completed")
         self.assertEqual(status["success_count"], 3)
+
+    async def test_created_task_persists_only_safe_model_reference(self):
+        service = BatchService()
+        service._persist_task_create = AsyncMock()
+        config_id = uuid4()
+
+        result = await service.create_batch_task(
+            [{"title": "A"}],
+            {
+                "mode": "custom",
+                "model_ref": ImageModelRef(
+                    source="config",
+                    display_name="公共模型",
+                    config_id=config_id,
+                ).to_dict(),
+                "image_model_config": {
+                    "api_key": "secret-value",
+                    "base_url": "https://secret.example.test",
+                },
+            },
+        )
+
+        shared_config = _tasks[result["task_id"]]["shared_config"]
+        serialized = json.dumps(shared_config)
+        self.assertNotIn("image_model_config", shared_config)
+        self.assertNotIn("api_key", serialized)
+        self.assertNotIn("base_url", serialized)
+        self.assertNotIn("secret-value", serialized)
+
+    async def test_runtime_model_is_resolved_before_primary_only_generation(self):
+        service = BatchService()
+        service._persist_task_create = AsyncMock()
+        service._sync_task_state = AsyncMock()
+        service._save_single_output = AsyncMock()
+        runtime = {
+            "provider_override": None,
+            "image_model_config": {
+                "provider_type": "openai_image",
+                "api_key": "secret-value",
+                "base_url": "https://images.example.test",
+                "model_name": "gpt-image-2",
+            },
+        }
+        generate = AsyncMock(
+            return_value={"success": True, "image_url": "/static/custom.png", "prompt_used": "p"}
+        )
+        result = await service.create_single_generation_task(
+            mode="custom",
+            params={"prompt": "测试"},
+            runtime_input={},
+            shared_config={
+                "aspect_ratio": "3:4",
+                "model_ref": ImageModelRef(
+                    source="builtin",
+                    display_name="系统 Gemini",
+                    provider="gemini",
+                ).to_dict(),
+            },
+        )
+
+        with patch.object(service, "_resolve_task_runtime_config", AsyncMock(return_value=runtime)):
+            with patch(
+                "app.services.batch_service.poster_service.generate_custom",
+                generate,
+            ):
+                await service.run_single_generation_task(result["task_id"])
+
+        self.assertEqual(generate.await_count, 1)
+        self.assertEqual(generate.await_args.kwargs["image_model_config"]["api_key"], "secret-value")
+        self.assertNotIn("secret-value", json.dumps(_tasks[result["task_id"]]["shared_config"]))
 
     async def test_append_batch_items_adds_pending_items(self):
         service = BatchService()
