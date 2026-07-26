@@ -61,6 +61,12 @@ def _postgres_upgrade_statements() -> tuple[str, ...]:
         "ADD COLUMN IF NOT EXISTS actual_model_name VARCHAR(100)",
         "ALTER TABLE batch_task_items "
         "ADD COLUMN IF NOT EXISTS fallback_attempts INTEGER NOT NULL DEFAULT 0",
+        "CREATE INDEX IF NOT EXISTS ix_image_model_configs_fallback_enabled "
+        "ON image_model_configs (fallback_enabled)",
+        "CREATE INDEX IF NOT EXISTS ix_image_model_configs_fallback_priority "
+        "ON image_model_configs (fallback_priority)",
+        "CREATE INDEX IF NOT EXISTS ix_batch_tasks_access_token_hash "
+        "ON batch_tasks (access_token_hash)",
         """
         UPDATE batch_tasks
         SET shared_config = (
@@ -68,7 +74,8 @@ def _postgres_upgrade_statements() -> tuple[str, ...]:
             #- '{image_model_config,api_key}'
             #- '{image_model_config,base_url}'
         )::json
-        WHERE shared_config::jsonb #> '{image_model_config}' IS NOT NULL
+        WHERE shared_config::jsonb #> '{image_model_config,api_key}' IS NOT NULL
+           OR shared_config::jsonb #> '{image_model_config,base_url}' IS NOT NULL
         """,
     )
 

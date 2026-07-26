@@ -35,6 +35,30 @@ class ImageFallbackMigrationSqlTests(unittest.TestCase):
         self.assertIn("::json", sql)
         self.assertIn("#- '{image_model_config,api_key}'", sql)
         self.assertIn("#- '{image_model_config,base_url}'", sql)
+        self.assertIn("#> '{image_model_config,api_key}' is not null", sql)
+        self.assertIn("#> '{image_model_config,base_url}' is not null", sql)
+
+    def test_upgrade_statements_create_stable_fallback_indexes(self):
+        sql = "\n".join(db_module._postgres_upgrade_statements()).lower()
+
+        expected_indexes = [
+            (
+                "ix_image_model_configs_fallback_enabled",
+                "image_model_configs (fallback_enabled)",
+            ),
+            (
+                "ix_image_model_configs_fallback_priority",
+                "image_model_configs (fallback_priority)",
+            ),
+            (
+                "ix_batch_tasks_access_token_hash",
+                "batch_tasks (access_token_hash)",
+            ),
+        ]
+        for index_name, target in expected_indexes:
+            with self.subTest(index_name=index_name):
+                self.assertIn(f"create index if not exists {index_name}", sql)
+                self.assertIn(target, sql)
 
     def test_upgrade_statements_are_plain_executable_sql(self):
         statements = db_module._postgres_upgrade_statements()
@@ -42,8 +66,12 @@ class ImageFallbackMigrationSqlTests(unittest.TestCase):
         self.assertIsInstance(statements, tuple)
         self.assertTrue(statements)
         self.assertTrue(all(isinstance(statement, str) and statement.strip() for statement in statements))
-        self.assertTrue(all("add column" in statement.lower() or "update batch_tasks" in statement.lower()
-                            for statement in statements))
+        self.assertTrue(all(
+            "add column" in statement.lower()
+            or "create index" in statement.lower()
+            or "update batch_tasks" in statement.lower()
+            for statement in statements
+        ))
 
 
 class ImageFallbackMigrationExecutionTests(unittest.IsolatedAsyncioTestCase):
@@ -64,7 +92,7 @@ TEST_DATABASE_URL = os.getenv("TEST_DATABASE_URL")
 
 @unittest.skipUnless(
     TEST_DATABASE_URL,
-    "TEST_DATABASE_URL 未配置，跳过独立 PostgreSQL 幂等迁移集成测试",
+    "TEST_DATABASE_URL 未配置，跳过发布门槛：独立 PostgreSQL 幂等迁移集成测试",
 )
 class ImageFallbackMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
     async def test_upgrade_is_idempotent_and_only_removes_sensitive_model_paths(self):
@@ -81,9 +109,9 @@ class ImageFallbackMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                 await self._create_legacy_tables(conn)
                 await self._insert_legacy_tasks(conn)
 
-                for _ in range(2):
-                    for statement in db_module._postgres_upgrade_statements():
-                        await conn.execute(text(statement))
+                statements = db_module._postgres_upgrade_statements()
+                first_cleanup_count = await self._run_upgrade(conn, statements)
+                second_cleanup_count = await self._run_upgrade(conn, statements)
 
                 rows = (
                     await conn.execute(text(
@@ -107,10 +135,46 @@ class ImageFallbackMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
                     configs["00000000-0000-0000-0000-000000000003"],
                     {"mode": "template"},
                 )
+                self.assertEqual(
+                    configs["00000000-0000-0000-0000-000000000004"],
+                    {
+                        "mode": "custom",
+                        "image_model_config": {
+                            "id": "model-2",
+                            "name": "已脱敏模型",
+                        },
+                    },
+                )
+                self.assertEqual(first_cleanup_count, 1)
+                self.assertEqual(second_cleanup_count, 0)
+
+                indexes = {
+                    row.indexname
+                    for row in (
+                        await conn.execute(text(
+                            "SELECT indexname FROM pg_indexes "
+                            "WHERE schemaname = current_schema()"
+                        ))
+                    ).all()
+                }
+                self.assertTrue({
+                    "ix_image_model_configs_fallback_enabled",
+                    "ix_image_model_configs_fallback_priority",
+                    "ix_batch_tasks_access_token_hash",
+                }.issubset(indexes))
         finally:
             async with engine.begin() as conn:
                 await conn.execute(text(f'DROP SCHEMA IF EXISTS "{schema}" CASCADE'))
             await engine.dispose()
+
+    async def _run_upgrade(self, conn, statements):
+        cleanup_count = None
+        for statement in statements:
+            result = await conn.execute(text(statement))
+            if statement.lstrip().upper().startswith("UPDATE BATCH_TASKS"):
+                cleanup_count = result.rowcount
+        self.assertIsNotNone(cleanup_count)
+        return cleanup_count
 
     async def _create_legacy_tables(self, conn):
         statements = [
@@ -141,6 +205,16 @@ class ImageFallbackMigrationPostgresTests(unittest.IsolatedAsyncioTestCase):
             ),
             ("00000000-0000-0000-0000-000000000002", {}),
             ("00000000-0000-0000-0000-000000000003", {"mode": "template"}),
+            (
+                "00000000-0000-0000-0000-000000000004",
+                {
+                    "mode": "custom",
+                    "image_model_config": {
+                        "id": "model-2",
+                        "name": "已脱敏模型",
+                    },
+                },
+            ),
         ]
         for task_id, shared_config in payloads:
             await conn.execute(
