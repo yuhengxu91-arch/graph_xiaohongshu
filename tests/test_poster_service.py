@@ -1,4 +1,5 @@
 import base64
+import asyncio
 import importlib
 import io
 import os
@@ -9,18 +10,40 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
+import httpx
+
 from app.services.poster_service import PosterService
 from app.services.image_fallback_service import ImageModelRef
+from app.services.image_generation_errors import ImageGenerationError
 
 poster_service_module = importlib.import_module("app.services.poster_service")
+VALID_IMAGE_B64 = (
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0l"
+    "EQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII="
+)
+VALID_IMAGE_BYTES = base64.b64decode(VALID_IMAGE_B64)
 
 
 class FakeResponse:
-    def __init__(self, payload=None, content=b""):
+    def __init__(self, payload=None, content=b"", status_code=200, headers=None):
         self._payload = payload if payload is not None else {}
         self.content = content
+        self.status_code = status_code
+        self.headers = headers or ({"content-type": "image/png"} if content else {})
 
     def raise_for_status(self):
+        if self.status_code >= 400:
+            request = httpx.Request("POST", "https://provider.invalid/images")
+            response = httpx.Response(
+                self.status_code,
+                request=request,
+                json=self._payload,
+            )
+            raise httpx.HTTPStatusError(
+                f"status {self.status_code}",
+                request=request,
+                response=response,
+            )
         return None
 
     def json(self):
@@ -63,7 +86,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
                     "message": "success",
                     "data": {
                         "model": "doubao-seedream-4-5-251128",
-                        "data": [{"b64_json": "nested-image"}],
+                        "data": [{"b64_json": VALID_IMAGE_B64}],
                     },
                 }
             )
@@ -73,7 +96,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
             with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
                 image = await service._call_doubao_image_api("生成一张海报")
 
-        self.assertEqual(image, "nested-image")
+        self.assertEqual(image, VALID_IMAGE_B64)
         self.assertEqual(client.post_payload["response_format"], "b64_json")
         self.assertEqual(client.post_payload["size"], "1536x2048")
         self.assertEqual(client.get_urls, [])
@@ -81,20 +104,20 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
     async def test_doubao_uses_selected_aspect_ratio_size(self):
         service = PosterService()
         client = FakeAsyncClient(
-            post_response=FakeResponse({"data": [{"b64_json": "portrait-image"}]}),
+            post_response=FakeResponse({"data": [{"b64_json": VALID_IMAGE_B64}]}),
         )
 
         with patch.dict(os.environ, {"LLM_API_KEY": "test-key", "LLM_BASE_URL": "https://example.test/api/v3"}):
             with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
                 image = await service._call_doubao_image_api("生成一张海报", aspect_ratio="9:16")
 
-        self.assertEqual(image, "portrait-image")
+        self.assertEqual(image, VALID_IMAGE_B64)
         self.assertEqual(client.post_payload["size"], "1024x1792")
 
     async def test_call_ai_image_api_passes_aspect_ratio_to_openai_image(self):
         service = PosterService()
         client = FakeAsyncClient(
-            post_response=FakeResponse({"data": [{"b64_json": "third-party-image"}]}),
+            post_response=FakeResponse({"data": [{"b64_json": VALID_IMAGE_B64}]}),
         )
         image_model_config = {
             "provider_type": "openai_image",
@@ -111,13 +134,13 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
                 aspect_ratio="3:4",
             )
 
-        self.assertEqual(image, "third-party-image")
+        self.assertEqual(image, VALID_IMAGE_B64)
         self.assertEqual(client.post_payload["size"], "1536x2048")
 
     async def test_dynamic_openai_image_does_not_log_base_url_or_api_key(self):
         service = PosterService()
         client = FakeAsyncClient(
-            post_response=FakeResponse({"data": [{"b64_json": "third-party-image"}]}),
+            post_response=FakeResponse({"data": [{"b64_json": VALID_IMAGE_B64}]}),
         )
         image_model_config = {
             "provider_type": "openai_image",
@@ -142,7 +165,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
         service = PosterService()
         service.provider = "doubao"
         client = FakeAsyncClient(
-            post_response=FakeResponse({"data": [{"b64_json": "template-image"}]}),
+            post_response=FakeResponse({"data": [{"b64_json": VALID_IMAGE_B64}]}),
         )
 
         with patch.dict(os.environ, {"LLM_API_KEY": "test-key", "LLM_BASE_URL": "https://example.test/api/v3"}):
@@ -152,7 +175,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
                     aspect_ratio="3:4",
                 )
 
-        self.assertEqual(image, "template-image")
+        self.assertEqual(image, VALID_IMAGE_B64)
         self.assertEqual(client.post_payload["size"], "1536x2048")
 
     async def test_db_template_generation_passes_selected_aspect_ratio_to_image_api(self):
@@ -176,7 +199,7 @@ class PosterServiceDoubaoTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_doubao_downloads_url_when_only_url_is_returned(self):
         service = PosterService()
-        raw_image = b"fake-png"
+        raw_image = VALID_IMAGE_BYTES
         client = FakeAsyncClient(
             post_response=FakeResponse({"data": [{"url": "https://cdn.example.test/image.png"}]}),
             get_response=FakeResponse(content=raw_image),
@@ -204,7 +227,7 @@ class PosterServiceGeminiTests(unittest.IsolatedAsyncioTestCase):
                                     {
                                         "inline_data": {
                                             "mime_type": "image/png",
-                                            "data": "proxy-image",
+                                            "data": VALID_IMAGE_B64,
                                         }
                                     },
                                 ]
@@ -218,7 +241,154 @@ class PosterServiceGeminiTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
             image = await service._call_gemini_api("生成一张海报", use_changhuai=True)
 
-        self.assertEqual(image, "proxy-image")
+        self.assertEqual(image, VALID_IMAGE_B64)
+
+
+class PosterServiceStructuredErrorTests(unittest.IsolatedAsyncioTestCase):
+    def openai_config(self):
+        return {
+            "provider_type": "openai_image",
+            "base_url": "https://private-provider.example.test",
+            "model_name": "private-model",
+            "api_key": "secret-value",
+            "name": "私有生图",
+        }
+
+    async def test_openai_temporary_http_error_is_retryable_and_silent(self):
+        client = FakeAsyncClient(
+            post_response=FakeResponse(
+                {"error": {"code": "service_unavailable", "message": "raw-secret-body"}},
+                status_code=503,
+            )
+        )
+        service = PosterService()
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
+            with patch("builtins.print") as print_mock:
+                with self.assertRaises(ImageGenerationError) as raised:
+                    await service._call_openai_image_api(
+                        "完整敏感提示词",
+                        self.openai_config(),
+                    )
+
+        self.assertTrue(raised.exception.retryable)
+        self.assertEqual(raised.exception.category, "server_error")
+        output = " ".join(str(call) for call in print_mock.call_args_list)
+        for secret in (
+            "private-provider.example.test",
+            "secret-value",
+            "完整敏感提示词",
+            "raw-secret-body",
+        ):
+            self.assertNotIn(secret, output)
+
+    async def test_openai_auth_error_is_not_retryable(self):
+        client = FakeAsyncClient(
+            post_response=FakeResponse(
+                {"error": {"code": "invalid_api_key"}},
+                status_code=401,
+            )
+        )
+        service = PosterService()
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
+            with self.assertRaises(ImageGenerationError) as raised:
+                await service._call_openai_image_api("prompt", self.openai_config())
+        self.assertFalse(raised.exception.retryable)
+        self.assertEqual(raised.exception.category, "auth")
+
+    async def test_openai_empty_and_invalid_inline_results_raise_retryable_errors(self):
+        service = PosterService()
+        for payload, expected in (
+            ({"data": []}, "empty_result"),
+            ({"data": [{"b64_json": "not-valid-%%%"}]}, "invalid_image"),
+        ):
+            client = FakeAsyncClient(post_response=FakeResponse(payload))
+            with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
+                with self.assertRaises(ImageGenerationError) as raised:
+                    await service._call_openai_image_api("prompt", self.openai_config())
+            self.assertTrue(raised.exception.retryable)
+            self.assertEqual(raised.exception.category, expected)
+
+    async def test_invalid_user_input_image_is_not_retryable(self):
+        service = PosterService()
+        client = FakeAsyncClient(
+            post_response=FakeResponse({"data": [{"b64_json": VALID_IMAGE_B64}]})
+        )
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
+            with self.assertRaises(ImageGenerationError) as raised:
+                await service._call_openai_image_api(
+                    "prompt",
+                    self.openai_config(),
+                    input_image_base64="not-valid-%%%",
+                )
+        self.assertEqual(raised.exception.category, "invalid_request")
+        self.assertFalse(raised.exception.retryable)
+
+    async def test_remote_image_download_is_validated(self):
+        service = PosterService()
+        client = FakeAsyncClient(
+            post_response=FakeResponse({"data": [{"url": "https://cdn.invalid/image"}]}),
+            get_response=FakeResponse(
+                content=b"<html>bad gateway</html>",
+                headers={"content-type": "text/html"},
+            ),
+        )
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
+            with self.assertRaises(ImageGenerationError) as raised:
+                await service._call_openai_image_api("prompt", self.openai_config())
+        self.assertEqual(raised.exception.category, "invalid_image")
+        self.assertTrue(raised.exception.retryable)
+
+    async def test_gemini_safety_block_is_not_retryable(self):
+        service = PosterService()
+        client = FakeAsyncClient(
+            post_response=FakeResponse(
+                {"promptFeedback": {"blockReason": "SAFETY"}}
+            )
+        )
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
+            with self.assertRaises(ImageGenerationError) as raised:
+                await service._call_gemini_api(
+                    "prompt",
+                    dynamic_config={
+                        "api_key": "secret-value",
+                        "base_url": "https://private-provider.example.test",
+                        "model_name": "gemini-image",
+                    },
+                )
+        self.assertEqual(raised.exception.category, "moderation")
+        self.assertFalse(raised.exception.retryable)
+
+    async def test_doubao_item_error_is_classified(self):
+        service = PosterService()
+        client = FakeAsyncClient(
+            post_response=FakeResponse(
+                {"data": [{"error": {"code": "content_policy_violation"}}]}
+            )
+        )
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
+            with self.assertRaises(ImageGenerationError) as raised:
+                await service._call_doubao_image_api(
+                    "prompt",
+                    dynamic_config={
+                        "api_key": "secret-value",
+                        "base_url": "https://private-provider.example.test",
+                        "model_name": "seedream",
+                    },
+                )
+        self.assertEqual(raised.exception.category, "moderation")
+        self.assertFalse(raised.exception.retryable)
+
+    async def test_cancelled_error_propagates(self):
+        service = PosterService()
+
+        class CancelledClient(FakeAsyncClient):
+            async def post(self, url, **kwargs):
+                raise asyncio.CancelledError()
+
+        client = CancelledClient(post_response=FakeResponse())
+        with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
+            with self.assertRaises(asyncio.CancelledError):
+                await service._call_openai_image_api("prompt", self.openai_config())
 
 
 class PosterServiceProviderTests(unittest.TestCase):

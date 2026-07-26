@@ -14,6 +14,14 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from dotenv import load_dotenv
 
+from app.services.image_generation_errors import (
+    ImageGenerationError,
+    classify_download_response,
+    classify_provider_response,
+    decode_inline_image,
+    provider_request_error,
+)
+
 load_dotenv()
 
 
@@ -187,7 +195,6 @@ class PosterService:
         ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
 
         # 3. 调用 AI 生成图片
-        print(f"[PosterService] 自定义生成: {prompt[:50]}...")
         image_base64 = await self._call_ai_image_api(
             enhanced_prompt,
             input_images_base64=reference_image_inputs,
@@ -310,7 +317,6 @@ class PosterService:
             ai_prompt = self._inject_brand(ai_prompt, brand_kit)
 
         # 8. 调用 AI 生成
-        print(f"[PosterService] 模板生成 [{template['name']}]: {params.get('title', '')}")
         image_base64 = await self._call_ai_image_api(
             ai_prompt,
             provider_override=provider_override,
@@ -424,8 +430,6 @@ class PosterService:
                 ai_prompt += f"\n\n请参考上传的 {len(input_images_base64)} 张图片的主体信息、构图关系或二维码内容进行创作。"
 
         # 6. 调用 AI 生成
-        print(f"[PosterService] 个人模板生成 [{template_name}]: {params.get('title', '')}")
-        print(f"[PosterService] 提示词: {ai_prompt[:200]}...")
         image_base64 = await self._call_ai_image_api(
             ai_prompt,
             input_image_base64=input_image_base64,
@@ -482,7 +486,6 @@ class PosterService:
         enhanced_prompt = self._build_edit_prompt(edit_prompt, aspect_ratio)
         ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
 
-        print(f"[PosterService] 以图改图: {edit_prompt[:50]}...")
         image_result_base64 = await self._call_ai_image_api(
             enhanced_prompt, input_image_base64=image_base64,
             provider_override=provider_override,
@@ -539,7 +542,6 @@ class PosterService:
         ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
 
         style_names = ", ".join(style_tags)
-        print(f"[PosterService] 风格迁移: {style_names} | 强度={strength}")
         image_result_base64 = await self._call_ai_image_api(
             enhanced_prompt, input_image_base64=image_base64,
             provider_override=provider_override,
@@ -1112,8 +1114,12 @@ class PosterService:
                     dynamic_config=image_model_config,
                     aspect_ratio=aspect_ratio,
                 )
-            print(f"[PosterService] 未知动态图片模型类型: {provider_type}")
-            return None
+            raise ImageGenerationError(
+                "invalid_request",
+                "图片生成参数无效",
+                retryable=False,
+                internal_code="unknown_provider_type",
+            )
 
         effective = self._get_effective_provider(provider_override)
         if effective == "doubao":
@@ -1179,23 +1185,24 @@ class PosterService:
         input_images_base64: Optional[List[str]] = None,
         mask_image_base64: Optional[str] = None,
         aspect_ratio: Optional[str] = None,
-    ) -> Optional[str]:
+    ) -> str:
         """调用 OpenAI Images 兼容接口。"""
         api_key = config.get("api_key", "")
         base_url = (config.get("base_url") or "").rstrip("/")
         model = config.get("model_name") or config.get("model") or "gpt-image-2"
-        tag = config.get("name") or "OpenAI-Image"
         size = self._resolve_api_size(aspect_ratio)
 
         if not api_key:
-            print(f"[PosterService] {tag} API Key 未配置")
-            return None
+            raise ImageGenerationError(
+                "auth",
+                "图片服务鉴权失败，请联系管理员",
+                retryable=False,
+                internal_code="missing_api_key",
+            )
 
         input_images = self._merge_input_images(input_image_base64, input_images_base64)
         is_edit = bool(input_images)
         url = f"{base_url}/v1/images/{'edits' if is_edit else 'generations'}"
-        print(f"[PosterService] {tag} 使用模型: {model}")
-        print(f"[PosterService] {tag} 生图尺寸: {size} (aspect_ratio={aspect_ratio or '3:4'})")
 
         payload: Dict[str, Any] = {
             "model": model,
@@ -1226,26 +1233,100 @@ class PosterService:
                         json=payload,
                         headers={**headers, "Content-Type": "application/json"},
                     )
-                response.raise_for_status()
-                result = response.json()
+                result = self._safe_response_json(response)
+                response_error = classify_provider_response(
+                    "openai",
+                    getattr(response, "status_code", 200),
+                    result,
+                )
+                if response_error:
+                    raise response_error
+
                 data_list = result.get("data", [])
                 if data_list:
                     item = data_list[0]
                     if item.get("b64_json"):
-                        return item["b64_json"]
+                        return self._validated_inline_image(item["b64_json"])
                     if item.get("url"):
-                        img_resp = await client.get(item["url"], timeout=60.0)
-                        img_resp.raise_for_status()
-                        return base64.b64encode(img_resp.content).decode("utf-8")
+                        return await self._download_image_base64(client, item["url"])
 
-            print(f"[PosterService] {tag} 生图无图片: {str(result)[:200]}")
-            return None
-        except httpx.HTTPStatusError as e:
-            print(f"[PosterService] {tag} HTTP 错误: {e.response.status_code} {e.response.text[:200]}")
-            return None
-        except Exception as e:
-            print(f"[PosterService] {tag} 请求异常: {e}")
-            return None
+                empty_error = classify_provider_response(
+                    "openai",
+                    getattr(response, "status_code", 200),
+                    result,
+                    has_image=False,
+                )
+                if empty_error:
+                    raise empty_error
+                raise ImageGenerationError(
+                    "empty_result",
+                    "图片服务未返回有效图片",
+                    retryable=True,
+                )
+        except asyncio.CancelledError:
+            raise
+        except ImageGenerationError:
+            raise
+        except httpx.RequestError as exc:
+            raise provider_request_error(exc) from exc
+        except Exception as exc:
+            raise ImageGenerationError(
+                "provider_error",
+                "图片生成失败",
+                retryable=False,
+                internal_code=type(exc).__name__,
+            ) from exc
+
+    def _safe_response_json(self, response: Any) -> Dict[str, Any]:
+        """解析供应商 JSON；不把原始响应内容写入异常。"""
+        try:
+            result = response.json()
+        except Exception as exc:
+            if getattr(response, "status_code", 200) >= 400:
+                return {}
+            raise ImageGenerationError(
+                "provider_error",
+                "图片生成失败",
+                retryable=False,
+                provider_status=getattr(response, "status_code", None),
+                internal_code="invalid_json_response",
+            ) from exc
+        if not isinstance(result, dict):
+            raise ImageGenerationError(
+                "provider_error",
+                "图片生成失败",
+                retryable=False,
+                provider_status=getattr(response, "status_code", None),
+                internal_code="invalid_response_shape",
+            )
+        return result
+
+    def _validated_inline_image(self, image_data: str) -> str:
+        decode_inline_image(image_data)
+        return image_data
+
+    async def _download_image_base64(
+        self,
+        client: httpx.AsyncClient,
+        image_url: str,
+    ) -> str:
+        """下载并验证供应商返回的临时图片 URL。"""
+        try:
+            response = await client.get(image_url, timeout=60.0)
+        except asyncio.CancelledError:
+            raise
+        except httpx.RequestError as exc:
+            raise provider_request_error(exc) from exc
+
+        headers = getattr(response, "headers", {}) or {}
+        error = classify_download_response(
+            status=getattr(response, "status_code", 200),
+            content_type=headers.get("content-type", ""),
+            content=getattr(response, "content", b""),
+        )
+        if error:
+            raise error
+        return base64.b64encode(response.content).decode("ascii")
 
     def _openai_image_file_tuple(self, image_base64: str, *, filename: str = "image.png") -> tuple[str, bytes, str]:
         """将 data URL 或裸 base64 转为 OpenAI Images multipart 文件。"""
@@ -1259,7 +1340,16 @@ class PosterService:
             if media:
                 mime_type = media
 
-        return (filename, base64.b64decode(encoded), mime_type)
+        try:
+            image_bytes = decode_inline_image(encoded)
+        except ImageGenerationError as exc:
+            raise ImageGenerationError(
+                "invalid_request",
+                "图片生成参数无效",
+                retryable=False,
+                internal_code="invalid_input_image",
+            ) from exc
+        return (filename, image_bytes, mime_type)
 
     def _extract_reference_image_base64s(self, reference_images: Optional[List[Dict[str, Any]]]) -> List[str]:
         """从前端参考图数组中提取可传给模型的图片数据，不设置业务张数上限。"""
@@ -1299,7 +1389,7 @@ class PosterService:
         input_image_base64: Optional[str] = None,
         dynamic_config: Optional[Dict[str, Any]] = None,
         aspect_ratio: Optional[str] = None,
-    ) -> Optional[str]:
+    ) -> str:
         """
         调用火山方舟 doubao-seedream 图片生成 API。
         使用和 LLM 相同的 API Key，OpenAI 兼容格式。
@@ -1309,8 +1399,12 @@ class PosterService:
         model = (dynamic_config or {}).get("model_name") or os.getenv("DOUBAO_IMAGE_MODEL", "doubao-seedream-3-0-t2i-250415")
 
         if not llm_api_key:
-            print("[PosterService] LLM_API_KEY 未配置，无法使用 doubao 生图")
-            return None
+            raise ImageGenerationError(
+                "auth",
+                "图片服务鉴权失败，请联系管理员",
+                retryable=False,
+                internal_code="missing_api_key",
+            )
 
         size = self._resolve_api_size(aspect_ratio)
         url = f"{llm_base_url}/images/generations"
@@ -1320,8 +1414,6 @@ class PosterService:
             "response_format": "b64_json",
             "size": size,
         }
-        print(f"[PosterService] doubao 生图尺寸: {size} (aspect_ratio={aspect_ratio or '3:4'})")
-
         if input_image_base64:
             if not input_image_base64.startswith("data:"):
                 payload["image"] = f"data:image/png;base64,{input_image_base64}"
@@ -1336,35 +1428,50 @@ class PosterService:
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                result = response.json()
+                result = self._safe_response_json(response)
+                response_error = classify_provider_response(
+                    "doubao",
+                    getattr(response, "status_code", 200),
+                    result,
+                )
+                if response_error:
+                    raise response_error
 
                 data_list = self._extract_doubao_image_items(result)
                 for item in data_list:
                     if not isinstance(item, dict):
                         continue
                     if item.get("b64_json"):
-                        return item["b64_json"]
+                        return self._validated_inline_image(item["b64_json"])
                     if item.get("url"):
-                        img_resp = await client.get(item["url"], timeout=60.0)
-                        img_resp.raise_for_status()
-                        return base64.b64encode(img_resp.content).decode("utf-8")
-                    if item.get("error"):
-                        print(f"[PosterService] doubao 单图生成失败: {item['error']}")
+                        return await self._download_image_base64(client, item["url"])
 
-                error_message = self._extract_doubao_error_message(result)
-                if error_message:
-                    print(f"[PosterService] doubao 生图返回错误: {error_message}")
-                else:
-                    print(f"[PosterService] doubao 生图响应中未找到图片: {str(result)[:300]}")
-                return None
-
-        except httpx.HTTPStatusError as e:
-            print(f"[PosterService] doubao 生图 HTTP 错误: {e.response.status_code} {e.response.text[:300]}")
-            return None
-        except Exception as e:
-            print(f"[PosterService] doubao 生图异常: {e}")
-            return None
+                empty_error = classify_provider_response(
+                    "doubao",
+                    getattr(response, "status_code", 200),
+                    result,
+                    has_image=False,
+                )
+                if empty_error:
+                    raise empty_error
+                raise ImageGenerationError(
+                    "empty_result",
+                    "图片服务未返回有效图片",
+                    retryable=True,
+                )
+        except asyncio.CancelledError:
+            raise
+        except ImageGenerationError:
+            raise
+        except httpx.RequestError as exc:
+            raise provider_request_error(exc) from exc
+        except Exception as exc:
+            raise ImageGenerationError(
+                "provider_error",
+                "图片生成失败",
+                retryable=False,
+                internal_code=type(exc).__name__,
+            ) from exc
 
     def _extract_doubao_image_items(self, result: Dict[str, Any]) -> List[Dict[str, Any]]:
         """兼容方舟/OpenAI 风格和部分代理的嵌套响应结构。"""
@@ -1406,27 +1513,30 @@ class PosterService:
         dynamic_config: Optional[Dict[str, Any]] = None,
         input_images_base64: Optional[List[str]] = None,
         aspect_ratio: Optional[str] = None,
-    ) -> Optional[str]:
+    ) -> str:
         """调用 Gemini 图片生成/编辑 API"""
         if dynamic_config:
             api_key = dynamic_config.get("api_key", "")
             base_url = (dynamic_config.get("base_url") or "").rstrip("/")
             model = dynamic_config.get("model_name") or self.model
-            tag = dynamic_config.get("name") or "Gemini-Dynamic"
         elif use_changhuai:
             api_key = self.api_key_ch
             base_url = self.base_url_ch
             model = self.model_ch
-            tag = "Gemini-CH"
         else:
             api_key = self.api_key
             base_url = self.base_url
             model = self.model
-            tag = "Gemini"
+
+        if not api_key:
+            raise ImageGenerationError(
+                "auth",
+                "图片服务鉴权失败，请联系管理员",
+                retryable=False,
+                internal_code="missing_api_key",
+            )
 
         url = f"{base_url}/v1beta/models/{model}:generateContent"
-        print(f"[PosterService] {tag} 使用模型: {model}")
-        print(f"[PosterService] {tag} 生图比例: {aspect_ratio or '3:4'}")
 
         parts = []
         input_images = self._merge_input_images(input_image_base64, input_images_base64)
@@ -1460,26 +1570,45 @@ class PosterService:
         try:
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(url, json=payload, headers=headers)
-                response.raise_for_status()
-                result = response.json()
+                result = self._safe_response_json(response)
+                response_error = classify_provider_response(
+                    "gemini",
+                    getattr(response, "status_code", 200),
+                    result,
+                )
+                if response_error:
+                    raise response_error
 
                 image_data = self._extract_gemini_image_data(result)
                 if image_data:
-                    return image_data
+                    return self._validated_inline_image(image_data)
 
-                reason = self._extract_gemini_no_image_reason(result)
-                if reason:
-                    print(f"[PosterService] {tag} 响应中未找到图片数据: {reason}")
-                else:
-                    print(f"[PosterService] {tag} 响应中未找到图片数据: {str(result)[:300]}")
-                return None
-
-        except httpx.HTTPStatusError as e:
-            print(f"[PosterService] {tag} HTTP 错误: {e.response.status_code} {e.response.text[:200]}")
-            return None
-        except Exception as e:
-            print(f"[PosterService] {tag} 请求异常: {e}")
-            return None
+                empty_error = classify_provider_response(
+                    "gemini",
+                    getattr(response, "status_code", 200),
+                    result,
+                    has_image=False,
+                )
+                if empty_error:
+                    raise empty_error
+                raise ImageGenerationError(
+                    "empty_result",
+                    "图片服务未返回有效图片",
+                    retryable=True,
+                )
+        except asyncio.CancelledError:
+            raise
+        except ImageGenerationError:
+            raise
+        except httpx.RequestError as exc:
+            raise provider_request_error(exc) from exc
+        except Exception as exc:
+            raise ImageGenerationError(
+                "provider_error",
+                "图片生成失败",
+                retryable=False,
+                internal_code=type(exc).__name__,
+            ) from exc
 
     def _extract_gemini_image_data(self, result: Dict[str, Any]) -> Optional[str]:
         """从 Gemini generateContent 响应中提取图片 base64，兼容代理的 snake_case。"""

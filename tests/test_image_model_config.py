@@ -2,7 +2,7 @@ import importlib
 import unittest
 import uuid
 
-from tests.test_poster_service import FakeAsyncClient, FakeResponse
+from tests.test_poster_service import FakeAsyncClient, FakeResponse, VALID_IMAGE_B64
 from app.models.image_model import ImageModelConfig
 from app.services.image_model_service import ImageModelService
 from app.services.poster_service import PosterService
@@ -64,7 +64,7 @@ class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_dynamic_openai_image_config_overrides_env_provider_settings(self):
         service = PosterService()
         client = FakeAsyncClient(
-            post_response=FakeResponse({"data": [{"b64_json": "dynamic-image"}]}),
+            post_response=FakeResponse({"data": [{"b64_json": VALID_IMAGE_B64}]}),
         )
         image_model_config = {
             "provider_type": "openai_image",
@@ -82,13 +82,13 @@ class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
                 image_model_config=image_model_config,
             )
 
-        self.assertEqual(image, "dynamic-image")
+        self.assertEqual(image, VALID_IMAGE_B64)
         self.assertEqual(client.post_payload["model"], "gpt-image-custom")
 
     async def test_dynamic_openai_image_config_uses_edits_endpoint_with_input_image(self):
         service = PosterService()
         client = FakeAsyncClient(
-            post_response=FakeResponse({"data": [{"b64_json": "edited-image"}]}),
+            post_response=FakeResponse({"data": [{"b64_json": VALID_IMAGE_B64}]}),
         )
         image_model_config = {
             "provider_type": "openai_image",
@@ -102,11 +102,11 @@ class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
             image = await service._call_ai_image_api(
                 "把日期改成 7月9日，其他保持一致",
-                input_image_base64="data:image/png;base64,aW1hZ2UtYnl0ZXM=",
+                input_image_base64=f"data:image/png;base64,{VALID_IMAGE_B64}",
                 image_model_config=image_model_config,
             )
 
-        self.assertEqual(image, "edited-image")
+        self.assertEqual(image, VALID_IMAGE_B64)
         self.assertEqual(client.post_url, "https://dynamic.example.test/v1/images/edits")
         self.assertEqual(client.post_payload["model"], "gpt-image-custom")
         self.assertEqual(client.post_payload["prompt"], "把日期改成 7月9日，其他保持一致")
@@ -116,7 +116,7 @@ class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_dynamic_openai_image_config_sends_all_reference_images_to_edits_endpoint(self):
         service = PosterService()
         client = FakeAsyncClient(
-            post_response=FakeResponse({"data": [{"b64_json": "fused-image"}]}),
+            post_response=FakeResponse({"data": [{"b64_json": VALID_IMAGE_B64}]}),
         )
         image_model_config = {
             "provider_type": "openai_image",
@@ -131,13 +131,13 @@ class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
             image = await service._call_ai_image_api(
                 "把图1和图2融合成一张海报",
                 input_images_base64=[
-                    "data:image/png;base64,aW1hZ2UtMQ==",
-                    "data:image/webp;base64,aW1hZ2UtMg==",
+                    f"data:image/png;base64,{VALID_IMAGE_B64}",
+                    f"data:image/webp;base64,{VALID_IMAGE_B64}",
                 ],
                 image_model_config=image_model_config,
             )
 
-        self.assertEqual(image, "fused-image")
+        self.assertEqual(image, VALID_IMAGE_B64)
         self.assertEqual(client.post_url, "https://dynamic.example.test/v1/images/edits")
         image_files = [file for name, file in client.post_kwargs["files"] if name == "image"]
         self.assertEqual(len(image_files), 2)
