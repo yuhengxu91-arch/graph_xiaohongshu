@@ -17,7 +17,10 @@
 - Create: `tests/test_image_generation_errors.py`：错误码、HTTP 状态、审核和下载错误分类。
 - Create: `tests/test_image_fallback_service.py`：候选排序、能力过滤、降级执行和元数据。
 - Create: `tests/test_batch_task_access.py`：任务所有者和匿名访问令牌校验。
+- Create: `tests/test_image_fallback_migrations.py`：PostgreSQL 升级 SQL 和历史密钥清理。
 - Create: `frontend/tests/imageFallback.test.mjs`：管理员配置和结果提示回归测试。
+- Create: `frontend/src/utils/imageFallback.js`：结果汇总和条件展示纯函数。
+- Create: `frontend/src/utils/batchTaskAccess.js`：匿名任务令牌持有及请求头构造。
 - Modify: `app/models/image_model.py`：备用优先级及能力字段。
 - Modify: `app/models/batch_task.py`：访问令牌哈希和子项降级字段。
 - Modify: `app/core/db.py`：幂等启动迁移和历史任务密钥清理。
@@ -30,6 +33,7 @@
 - Modify: `app/api/v1/poster.py`：同步生成接口传递安全模型引用并返回降级字段。
 - Modify: `frontend/src/components/profile/PreferenceForm.vue`：备用顺序和能力设置。
 - Modify: `frontend/src/components/poster/ResultDisplay.vue`：单图提示、逐项标记和批量汇总。
+- Modify: `frontend/src/components/poster/PanelTemplate.vue`：模板队列的逐项标记和汇总。
 - Modify: `frontend/src/api.js`：任务访问令牌和 fetch SSE。
 
 ### Task 1: 数据模型与幂等迁移
@@ -54,6 +58,7 @@ assert hasattr(BatchTaskItem, "degraded")
 assert hasattr(BatchTaskItem, "requested_model_name")
 assert hasattr(BatchTaskItem, "actual_model_name")
 assert hasattr(BatchTaskItem, "fallback_attempts")
+assert hasattr(BatchTask, "access_token_hash")
 ```
 
 并测试 `ImageModelService` 拒绝启用备用但没有正优先级的配置，序列化包含能力字段但不暴露真实 Key。
@@ -66,18 +71,23 @@ Expected: FAIL，缺少新字段或校验。
 
 - [ ] **Step 3: 实现最小模型与迁移**
 
-新增字段并在 `init_db()` 中执行 `ADD COLUMN IF NOT EXISTS`。历史 `batch_tasks.shared_config` 使用 PostgreSQL JSONB 更新删除：
+新增字段（包括 `batch_tasks.access_token_hash`）并在 `init_db()` 中执行 `ADD COLUMN IF NOT EXISTS`。历史 `batch_tasks.shared_config` 是 PostgreSQL JSON，不是 JSONB，清理 SQL 必须显式转换：
 
 ```sql
-shared_config #- '{image_model_config,api_key}'
-              #- '{image_model_config,base_url}'
+UPDATE batch_tasks
+SET shared_config = (
+    shared_config::jsonb
+    #- '{image_model_config,api_key}'
+    #- '{image_model_config,base_url}'
+)::json
+WHERE shared_config::jsonb #> '{image_model_config}' IS NOT NULL
 ```
 
-迁移必须先判断 PostgreSQL 方言；测试环境不支持 JSONB 时跳过清理 SQL。
+把 PostgreSQL 升级语句提取为可测试的 `_postgres_upgrade_statements()`。`tests/test_image_fallback_migrations.py` 使用 PostgreSQL dialect 编译并通过 fake connection 执行全部语句，断言包含 `::jsonb`、`::json`、令牌列和全部降级列；SQLite 单元测试只跳过实际执行，不跳过 SQL 生成验证。
 
 - [ ] **Step 4: 运行测试确认通过**
 
-Run: `PYTHONPATH=. pytest tests/test_image_model_config.py tests/test_batch_service.py -q`
+Run: `PYTHONPATH=. pytest tests/test_image_model_config.py tests/test_batch_service.py tests/test_image_fallback_migrations.py -q`
 
 - [ ] **Step 5: 提交**
 
@@ -92,11 +102,13 @@ git commit -m "feat(models): add image fallback configuration"
 - Create: `app/services/image_fallback_service.py`
 - Modify: `app/services/image_model_service.py`
 - Modify: `app/services/profile_service.py`
+- Modify: `app/services/batch_service.py`
 - Modify: `app/api/v1/batch.py`
 - Modify: `app/api/v1/poster.py`
 - Test: `tests/test_image_fallback_service.py`
 - Test: `tests/test_profile_service.py`
 - Test: `tests/test_poster_service.py`
+- Test: `tests/test_batch_service.py`
 
 - [ ] **Step 1: 写失败测试**
 
@@ -123,11 +135,11 @@ async def resolve_runtime_config(db, model_ref) -> dict:
 
 - [ ] **Step 2: 运行测试确认失败**
 
-Run: `PYTHONPATH=. pytest tests/test_image_fallback_service.py tests/test_profile_service.py tests/test_poster_service.py -q`
+Run: `PYTHONPATH=. pytest tests/test_image_fallback_service.py tests/test_profile_service.py tests/test_poster_service.py tests/test_batch_service.py -q`
 
 - [ ] **Step 3: 实现安全引用**
 
-API 层和任务 `shared_config` 只保存 `model_ref` 的字典。协调器执行时用独立 session 查询公共模型 Key；内置模型从环境变量解析。
+API 层和任务 `shared_config` 只保存 `model_ref` 的字典。先实现“只解析并调用主模型”的兼容路径：后台执行时通过独立 session 将引用解析成短生命周期 runtime config，再调用现有 `PosterService`，本任务暂不启用备用链。内置模型从环境变量解析。切换持久化格式后，现有单张和批量生成测试必须保持全绿。
 
 - [ ] **Step 4: 增加密钥不落库测试**
 
@@ -142,7 +154,7 @@ assert "secret-value" not in serialized
 
 - [ ] **Step 5: 运行测试并提交**
 
-Run: `PYTHONPATH=. pytest tests/test_image_fallback_service.py tests/test_profile_service.py tests/test_poster_service.py -q`
+Run: `PYTHONPATH=. pytest tests/test_image_fallback_service.py tests/test_profile_service.py tests/test_poster_service.py tests/test_batch_service.py -q`
 
 ```bash
 git add app/services app/api tests
@@ -163,10 +175,15 @@ git commit -m "refactor(images): persist safe model references"
 
 - 连接失败、超时、临时 429、500/502/503/504 可降级。
 - 501/505/507、401/403、参数错误、余额/长期配额、审核拒绝不可降级。
+- 错误码比较对大小写、下划线和短横线归一化。
+- 余额、配额和审核业务码/关键词优先于 HTTP 429。
 - HTTP 200 根级 `error` 走错误表。
-- Gemini `SAFETY` 不得当作空图片。
+- Gemini `promptFeedback.blockReason`、`safetyRatings`、`SAFETY/PROHIBITED_CONTENT/BLOCKLIST/SPII/IMAGE_SAFETY` 不得当作空图片。
+- 豆包根级 `error`、`data.error`、`item.error` 按规格优先级解析。
 - `CancelledError` 原样传播。
-- 图片下载 404/408/429/500/502/503/504、非图片和解码失败可降级。
+- 图片下载 404/408/429/500/502/503/504、非图片、超出大小上限和解码失败可降级。
+- 图片下载 400/401/403 及其他明确 4xx 不降级。
+- 内联 Base64 无效或无法解码按无效供应商结果分类。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -210,6 +227,14 @@ git commit -m "feat(images): classify provider failures"
 - 主模型成功时不查询/调用备用模型。
 - 主模型临时失败后依次尝试候选。
 - 非 retryable 错误立即终止。
+- `derive_required_capabilities()` 根据调用输入推导并测试：
+  - 无参考图：`text_to_image`
+  - 单参考图：`single_reference`
+  - 多参考图：`multiple_references`
+  - 普通改图、风格迁移、扩图和尺寸适配：`image_edit`
+  - 局部重绘和擦除：`image_edit + mask_edit`
+  - 所有模式检查 `aspect_ratios`
+- 自定义多参考图、模板图片槽、edit、inpaint、erase、style transfer、outpaint、adapt 和 `export_all` 的能力组合均有测试。
 - 能力不匹配候选被跳过。
 - 备用成功返回：
 
@@ -232,7 +257,9 @@ Run: `PYTHONPATH=. pytest tests/test_image_fallback_service.py -q`
 
 - [ ] **Step 3: 实现协调器**
 
-每次主模型出现 retryable 错误后才查询当前候选。每个候选执行前重新确认启用状态和能力。日志只记录模型 ID、分类、状态和耗时。
+每次主模型出现 retryable 错误后才查询当前候选。每个候选执行前重新确认启用状态和能力。协调器接收 `GenerationContext(chain_id, task_id, item_id, user_id)`；结构化日志记录这些关联字段、模型 ID、分类、状态、耗时、尝试次数和最终状态。
+
+测试使用日志捕获器和递归响应检查，断言日志、数据库任务、状态响应、SSE 和重试响应中不存在 API Key、Base URL、完整第三方响应体或完整提示词。
 
 - [ ] **Step 4: 运行测试并提交**
 
@@ -255,7 +282,7 @@ git commit -m "feat(images): add ordered provider fallback"
 
 - [ ] **Step 1: 写失败测试**
 
-覆盖自定义、模板、普通批量和改图任务：
+覆盖自定义、模板、普通批量、单/多参考图、改图、局部重绘、擦除、风格迁移、扩图、尺寸适配和 `export_all`：
 
 - 成功项保存四个降级字段。
 - 混合批量正确统计降级项。
@@ -284,10 +311,15 @@ git commit -m "feat(images): persist fallback generation status"
 
 **Files:**
 - Modify: `app/models/batch_task.py`
+- Modify: `app/core/db.py`
 - Modify: `app/services/batch_service.py`
 - Modify: `app/api/v1/batch.py`
 - Modify: `frontend/src/api.js`
+- Create: `frontend/src/utils/batchTaskAccess.js`
+- Modify: `frontend/src/components/poster/ResultDisplay.vue`
+- Modify: `frontend/src/components/poster/PanelTemplate.vue`
 - Create: `tests/test_batch_task_access.py`
+- Test: `frontend/tests/imageFallback.test.mjs`
 
 - [ ] **Step 1: 写访问控制失败测试**
 
@@ -297,6 +329,9 @@ git commit -m "feat(images): persist fallback generation status"
 - 匿名任务必须提供正确令牌。
 - 登录用户不能仅凭 UUID 访问匿名任务。
 - 数据库和内存只保存 SHA-256 令牌哈希。
+- 创建响应只返回一次明文令牌；前端任务上下文 `{ taskId, accessToken }` 只保存在当前组件内存，不写 localStorage/sessionStorage。
+- 状态轮询、模板追加、重试和 fetch 下载均从同一任务上下文构造 `X-Task-Access-Token`。
+- SSE helper 使用 fetch stream 和请求头；现有 UI 继续使用轮询，不创建未使用的 SSE 连接。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -304,11 +339,26 @@ Run: `PYTHONPATH=. pytest tests/test_batch_task_access.py -q`
 
 - [ ] **Step 3: 实现统一校验**
 
-创建任务返回一次性 `task_access_token`。普通请求使用 `X-Task-Access-Token`；SSE 前端改用 `fetch` + `ReadableStream`，同样通过请求头提交令牌。
+创建任务返回一次性 `task_access_token`。`batchTaskAccess.js` 提供可执行纯函数：
+
+```js
+createBatchTaskContext(response)
+batchTaskHeaders(context)
+countDegradedItems(items)
+```
+
+`api.js` 中 `getBatchStatus`、`appendTemplateBatchItems`、`retryBatchTask`、`downloadBatchTask` 和 `streamBatchStatus` 都接收任务上下文而不是裸 `taskId`。下载改为带请求头的 fetch/blob。`ResultDisplay` 和 `PanelTemplate` 在当前任务生命周期内持有上下文并传给全部 helper。
+
+`app/core/db.py` 为现有数据库幂等增加 `access_token_hash` 列；Task 1 已覆盖首次迁移，本任务补充真实创建、校验和前端传递。
 
 - [ ] **Step 4: 运行测试并提交**
 
-Run: `PYTHONPATH=. pytest tests/test_batch_task_access.py tests/test_batch_retry_api.py -q`
+Run:
+
+```bash
+PYTHONPATH=. pytest tests/test_batch_task_access.py tests/test_batch_retry_api.py -q
+node --test frontend/tests/imageFallback.test.mjs
+```
 
 ```bash
 git add app frontend/src/api.js tests
@@ -326,7 +376,7 @@ git commit -m "fix(batch): enforce task ownership"
 
 - [ ] **Step 1: 写前后端失败测试**
 
-后端验证只有管理员可写备用配置、优先级必须为正整数、能力只接受白名单字段。前端静态回归测试验证开关、优先级、能力控件及 payload。
+后端验证只有管理员可写备用配置、优先级必须为正整数、能力只接受白名单字段。把表单 payload 归一化提取为可执行纯函数，测试开关关闭时清空优先级、能力白名单和支持比例；组件再保留一条入口接线回归测试。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -353,7 +403,9 @@ git commit -m "feat(admin): configure fallback image models"
 ### Task 8: 结果降级提示
 
 **Files:**
+- Create: `frontend/src/utils/imageFallback.js`
 - Modify: `frontend/src/components/poster/ResultDisplay.vue`
+- Modify: `frontend/src/components/poster/PanelTemplate.vue`
 - Modify: `frontend/tests/imageFallback.test.mjs`
 
 - [ ] **Step 1: 写失败测试**
@@ -364,7 +416,9 @@ git commit -m "feat(admin): configure fallback image models"
 - 单张降级显示固定提示和主/实际模型。
 - 批量卡片逐项显示“备用模型”标记。
 - 批量顶部显示降级数量汇总。
+- 模板批量独立结果网格显示同样的逐项标记和顶部汇总。
 - 全部失败仍显示重试按钮。
+- `imageFallback.js` 的 `fallbackNotice(item)`、`countDegradedItems(items)` 用真实输入做可执行测试，证明 `degraded=false` 时不生成提示且汇总数量正确。
 
 - [ ] **Step 2: 运行测试确认失败**
 
