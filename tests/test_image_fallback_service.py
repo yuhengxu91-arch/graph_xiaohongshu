@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 from uuid import uuid4
 
+from sqlalchemy.dialects import postgresql
+
 from app.services.image_fallback_service import ImageModelRef, resolve_runtime_config
 from app.services.image_model_service import ImageModelService
 
@@ -93,64 +95,125 @@ class RuntimeResolutionTests(unittest.IsolatedAsyncioTestCase):
 
 
 class FallbackCandidateTests(unittest.IsolatedAsyncioTestCase):
+    async def test_candidate_query_filters_and_orders_without_selecting_secrets(self):
+        service = ImageModelService()
+        primary_id = uuid4()
+        candidate_id = uuid4()
+
+        class MappingResult:
+            def mappings(self):
+                return self
+
+            def all(self):
+                return [{
+                    "id": candidate_id,
+                    "name": "安全候选",
+                    "provider_type": "openai_image",
+                    "capabilities": {
+                        "text_to_image": True,
+                        "aspect_ratios": ["3:4"],
+                    },
+                }]
+
+        class CapturingDb:
+            statement = None
+
+            async def execute(self, statement):
+                self.statement = statement
+                return MappingResult()
+
+        db = CapturingDb()
+        refs = await service.list_fallback_model_refs(
+            db,
+            primary_ref=ImageModelRef(
+                source="config",
+                display_name="主模型",
+                config_id=primary_id,
+            ),
+            required_capabilities={
+                "text_to_image": True,
+                "aspect_ratio": "3:4",
+            },
+        )
+
+        sql = str(
+            db.statement.compile(
+                dialect=postgresql.dialect(),
+                compile_kwargs={"literal_binds": True},
+            )
+        ).lower()
+        selected_columns = sql.partition("\nfrom ")[0]
+        self.assertIn("image_model_configs.is_active = true", sql)
+        self.assertIn("image_model_configs.fallback_enabled = true", sql)
+        self.assertIn("image_model_configs.fallback_priority > 0", sql)
+        self.assertIn(f"image_model_configs.id != '{primary_id}'", sql)
+        self.assertIn(
+            "order by image_model_configs.fallback_priority asc, "
+            "image_model_configs.sort_order asc, "
+            "image_model_configs.created_at asc",
+            sql,
+        )
+        self.assertNotIn("api_key", selected_columns)
+        self.assertNotIn("base_url", selected_columns)
+        self.assertNotIn("model_name", selected_columns)
+        self.assertNotIn("fallback_priority", selected_columns)
+        self.assertNotIn("sort_order", selected_columns)
+        self.assertNotIn("created_at", selected_columns)
+        self.assertEqual([ref.display_name for ref in refs], ["安全候选"])
+
     async def test_candidates_are_sorted_and_filtered_by_primary_state_and_capability(self):
         service = ImageModelService()
         now = datetime.now(timezone.utc)
         primary_id = uuid4()
 
-        def config(
+        def row(
             name,
             priority,
             sort_order,
             created_offset,
             *,
-            active=True,
-            fallback=True,
             capabilities=None,
-            config_id=None,
         ):
-            return SimpleNamespace(
-                id=config_id or uuid4(),
-                name=name,
-                provider_type="openai_image",
-                is_active=active,
-                fallback_enabled=fallback,
-                fallback_priority=priority,
-                sort_order=sort_order,
-                created_at=now + timedelta(seconds=created_offset),
-                capabilities=capabilities
+            return {
+                "id": uuid4(),
+                "name": name,
+                "provider_type": "openai_image",
+                "fallback_priority": priority,
+                "sort_order": sort_order,
+                "created_at": now + timedelta(seconds=created_offset),
+                "capabilities": capabilities
                 or {"text_to_image": True, "aspect_ratios": ["3:4"]},
-            )
+            }
 
-        configs = [
-            config("主模型", 1, 0, 0, config_id=primary_id),
-            config("停用", 1, 0, 0, active=False),
-            config("未加入备用", 1, 0, 0, fallback=False),
-            config(
+        rows = [
+            row(
                 "能力不匹配",
                 1,
                 0,
                 0,
                 capabilities={"text_to_image": False, "aspect_ratios": ["3:4"]},
             ),
-            config("备用 B", 2, 0, 20),
-            config("备用 A2", 1, 2, 10),
-            config("备用 A1", 1, 1, 30),
+            row("备用 A1", 1, 1, 30),
+            row("备用 A2", 1, 2, 10),
+            row("备用 B", 2, 0, 20),
         ]
 
-        with patch.object(service, "list_configs", AsyncMock(return_value=configs)):
-            refs = await service.list_fallback_model_refs(
-                object(),
-                primary_ref=ImageModelRef(
-                    source="config",
-                    display_name="主模型",
-                    config_id=primary_id,
-                ),
-                required_capabilities={
-                    "text_to_image": True,
-                    "aspect_ratio": "3:4",
-                },
-            )
+        result = SimpleNamespace(
+            mappings=lambda: SimpleNamespace(all=lambda: rows),
+        )
+        db = SimpleNamespace(execute=AsyncMock(return_value=result))
+        refs = await service.list_fallback_model_refs(
+            db,
+            primary_ref=ImageModelRef(
+                source="config",
+                display_name="主模型",
+                config_id=primary_id,
+            ),
+            required_capabilities={
+                "text_to_image": True,
+                "aspect_ratio": "3:4",
+            },
+        )
 
         self.assertEqual([ref.display_name for ref in refs], ["备用 A1", "备用 A2", "备用 B"])
         self.assertTrue(all(ref.source == "config" for ref in refs))

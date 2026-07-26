@@ -430,6 +430,42 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
 
 
 class PosterApiSafeModelReferenceTests(unittest.IsolatedAsyncioTestCase):
+    async def test_removed_provider_uses_system_default_in_sync_generation(self):
+        from app.api.v1 import poster as poster_api
+
+        values = iter(["jimeng", None])
+
+        async def execute(statement):
+            return SimpleNamespace(scalar_one_or_none=lambda: next(values))
+
+        db = SimpleNamespace(execute=AsyncMock(side_effect=execute), rollback=AsyncMock())
+        resolved_refs = []
+
+        async def resolve(model_ref):
+            resolved_refs.append(model_ref)
+            return {
+                "provider_override": model_ref.provider,
+                "image_model_config": None,
+            }
+
+        with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
+            with patch.object(
+                poster_api.image_model_service,
+                "get_default_config",
+                AsyncMock(return_value=None),
+            ):
+                with patch.object(
+                    poster_api,
+                    "_resolve_model_runtime",
+                    AsyncMock(side_effect=resolve),
+                ):
+                    await poster_api._prepare_sync_generation(
+                        db,
+                        SimpleNamespace(id=uuid4()),
+                    )
+
+        self.assertEqual(resolved_refs[0].provider, poster_api.poster_service.provider)
+
     async def test_selected_public_model_resolves_safe_reference_before_generation(self):
         from app.api.v1 import poster as poster_api
 

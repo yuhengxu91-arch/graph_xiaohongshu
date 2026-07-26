@@ -224,31 +224,37 @@ class ImageModelService:
         required_capabilities: Optional[dict[str, Any]] = None,
     ) -> list:
         """实时查询当前可用备用模型；本阶段只提供候选，不执行自动降级。"""
-        configs = await self.list_configs(db, include_inactive=True)
-        eligible = [
-            config
-            for config in configs
-            if bool(config.is_active)
-            and bool(config.fallback_enabled)
-            and config.fallback_priority is not None
-            and config.fallback_priority > 0
-            and not (
-                primary_ref.source == "config"
-                and primary_ref.config_id == config.id
+        query = (
+            select(
+                ImageModelConfig.id.label("id"),
+                ImageModelConfig.name.label("name"),
+                ImageModelConfig.provider_type.label("provider_type"),
+                ImageModelConfig.capabilities.label("capabilities"),
             )
+            .where(
+                ImageModelConfig.is_active == True,
+                ImageModelConfig.fallback_enabled == True,
+                ImageModelConfig.fallback_priority > 0,
+            )
+            .order_by(
+                ImageModelConfig.fallback_priority.asc(),
+                ImageModelConfig.sort_order.asc(),
+                ImageModelConfig.created_at.asc(),
+            )
+        )
+        if primary_ref.source == "config" and primary_ref.config_id:
+            query = query.where(ImageModelConfig.id != primary_ref.config_id)
+
+        rows = (await db.execute(query)).mappings().all()
+        return [
+            self._model_ref_from_safe_row(row)
+            for row in rows
+            if row["provider_type"] in self.VALID_PROVIDER_TYPES
             and self._supports_capabilities(
-                config.capabilities or {},
+                row["capabilities"] or {},
                 required_capabilities or {},
             )
         ]
-        eligible.sort(
-            key=lambda config: (
-                config.fallback_priority,
-                int(config.sort_order or 0),
-                config.created_at or datetime.min,
-            )
-        )
-        return [self.model_ref_for_config(config) for config in eligible]
 
     def mask_api_key(self, api_key: str) -> str:
         if not api_key:
@@ -305,6 +311,15 @@ class ImageModelService:
             if required_value and not available.get(name, False):
                 return False
         return True
+
+    def _model_ref_from_safe_row(self, row):
+        from app.services.image_fallback_service import ImageModelRef
+
+        return ImageModelRef(
+            source="config",
+            display_name=row["name"],
+            config_id=row["id"],
+        )
 
 
 image_model_service = ImageModelService()

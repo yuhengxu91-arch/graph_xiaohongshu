@@ -27,6 +27,15 @@ class ProfileServiceTests(unittest.TestCase):
 
 
 class ProfileServiceImageModelTests(unittest.IsolatedAsyncioTestCase):
+    async def test_removed_image_provider_falls_back_to_system_default(self):
+        service = ProfileService()
+        result = SimpleNamespace(scalar_one_or_none=lambda: "jimeng")
+        db = SimpleNamespace(execute=AsyncMock(return_value=result))
+
+        provider = await service.get_user_image_provider(db, user_id=uuid4())
+
+        self.assertIsNone(provider)
+
     async def test_selected_public_model_returns_safe_reference(self):
         service = ProfileService()
         config_id = uuid4()

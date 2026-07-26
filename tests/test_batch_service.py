@@ -1,7 +1,8 @@
 import asyncio
 import json
 import unittest
-from unittest.mock import AsyncMock, patch
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 from app.models.batch_task import BatchTask, BatchTaskItem
@@ -68,6 +69,87 @@ class BatchServiceTemplateTests(unittest.IsolatedAsyncioTestCase):
         status = service.get_batch_status(result["task_id"])
         self.assertEqual(status["status"], "completed")
         self.assertEqual(status["success_count"], 3)
+
+    async def test_removed_provider_uses_system_default_for_single_background_task(self):
+        from app.api.v1 import batch as batch_api
+
+        values = iter(["jimeng", None])
+
+        async def execute(statement):
+            return SimpleNamespace(scalar_one_or_none=lambda: next(values))
+
+        db = SimpleNamespace(execute=AsyncMock(side_effect=execute))
+        create_task = AsyncMock(return_value={
+            "success": True,
+            "task_id": "task-1",
+            "total_count": 1,
+        })
+        background_tasks = SimpleNamespace(add_task=MagicMock())
+
+        with patch.object(batch_api.brand_service, "get_brand_kit", AsyncMock(return_value=None)):
+            with patch.object(
+                batch_api.image_model_service,
+                "get_default_config",
+                AsyncMock(return_value=None),
+            ):
+                with patch.object(
+                    batch_api.batch_service,
+                    "create_single_generation_task",
+                    create_task,
+                ):
+                    response = await batch_api.single_custom_generate(
+                        batch_api.SingleCustomRequest(prompt="测试"),
+                        background_tasks,
+                        current_user=SimpleNamespace(id=uuid4()),
+                        db=db,
+                    )
+
+        self.assertTrue(response.success, response.error)
+        model_ref = ImageModelRef.from_dict(
+            create_task.await_args.kwargs["shared_config"]["model_ref"]
+        )
+        self.assertEqual(model_ref.provider, batch_api.poster_service.provider)
+
+    async def test_removed_provider_uses_system_default_for_template_batch(self):
+        from app.api.v1 import batch as batch_api
+        from app.services import template_service as template_service_module
+
+        values = iter(["jimeng", None])
+
+        async def execute(statement):
+            return SimpleNamespace(scalar_one_or_none=lambda: next(values))
+
+        db = SimpleNamespace(execute=AsyncMock(side_effect=execute))
+        template_id = uuid4()
+        template = SimpleNamespace(
+            id=template_id,
+            name="喜报",
+            style_tag=None,
+            config={"default_aspect_ratio": "3:4"},
+        )
+
+        with patch.object(
+            template_service_module.template_service,
+            "get_template",
+            AsyncMock(return_value=template),
+        ):
+            with patch.object(batch_api.brand_service, "get_brand_kit", AsyncMock(return_value=None)):
+                with patch.object(
+                    batch_api.image_model_service,
+                    "get_default_config",
+                    AsyncMock(return_value=None),
+                ):
+                    shared_config = await batch_api._template_shared_config(
+                        batch_api.TemplateBatchGenerateRequest(
+                            template_id=str(template_id),
+                            items=[batch_api.TemplateBatchItemInput(params={"title": "A"})],
+                        ),
+                        db,
+                        SimpleNamespace(id=uuid4()),
+                    )
+
+        model_ref = ImageModelRef.from_dict(shared_config["model_ref"])
+        self.assertEqual(model_ref.provider, batch_api.poster_service.provider)
 
     async def test_created_task_persists_only_safe_model_reference(self):
         service = BatchService()

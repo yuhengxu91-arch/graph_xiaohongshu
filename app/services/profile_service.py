@@ -288,7 +288,7 @@ class ProfileService:
         )
         result = await db.execute(stmt)
         row = result.scalar_one_or_none()
-        return row  # None = 跟随系统
+        return row if row in self.VALID_IMAGE_PROVIDERS else None
 
     async def get_user_image_model_config(
         self, db: AsyncSession, *, user_id: UUID
