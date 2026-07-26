@@ -172,6 +172,8 @@ class PosterService:
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
         brand_kit: Optional[Any] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
     ) -> Dict[str, Any]:
         """
         自定义生成海报
@@ -203,23 +205,23 @@ class PosterService:
         ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
 
         # 3. 调用 AI 生成图片
-        image_base64 = await self._call_ai_image_api(
-            enhanced_prompt,
+        outcome = await self._generate_image_outcome(
+            prompt=enhanced_prompt,
+            mode="custom",
             input_images_base64=reference_image_inputs,
             provider_override=provider_override,
             image_model_config=image_model_config,
             aspect_ratio=aspect_ratio,
+            primary_model_ref=primary_model_ref,
+            generation_context=generation_context,
         )
 
-        if not image_base64:
-            return {
-                "success": False,
-                "error": "AI 图片生成失败，请稍后重试",
-                "prompt_used": enhanced_prompt,
-            }
-
         # 4. 保存图片
-        image_url = self._save_image(image_base64, prefix="poster_custom", brand_kit=brand_kit)
+        image_url = self._save_image(
+            outcome.image_base64,
+            prefix="poster_custom",
+            brand_kit=brand_kit,
+        )
 
         return {
             "success": True,
@@ -229,6 +231,7 @@ class PosterService:
             "width": ratio_info["width"],
             "height": ratio_info["height"],
             "mode": "custom",
+            **self._outcome_metadata(outcome),
         }
 
     # ======================== 模板生成 ========================
@@ -243,6 +246,8 @@ class PosterService:
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
         brand_kit: Optional[Any] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
     ) -> Dict[str, Any]:
         """
         模板生成海报
@@ -325,22 +330,22 @@ class PosterService:
             ai_prompt = self._inject_brand(ai_prompt, brand_kit)
 
         # 8. 调用 AI 生成
-        image_base64 = await self._call_ai_image_api(
-            ai_prompt,
+        outcome = await self._generate_image_outcome(
+            prompt=ai_prompt,
+            mode="template",
             provider_override=provider_override,
             image_model_config=image_model_config,
             aspect_ratio=effective_ratio,
+            primary_model_ref=primary_model_ref,
+            generation_context=generation_context,
         )
 
-        if not image_base64:
-            return {
-                "success": False,
-                "error": "AI 图片生成失败，请稍后重试",
-                "prompt_used": ai_prompt,
-            }
-
         # 9. 保存图片
-        image_url = self._save_image(image_base64, prefix="poster_tpl", brand_kit=brand_kit)
+        image_url = self._save_image(
+            outcome.image_base64,
+            prefix="poster_tpl",
+            brand_kit=brand_kit,
+        )
 
         return {
             "success": True,
@@ -352,6 +357,7 @@ class PosterService:
             "height": ratio_info["height"],
             "mode": "template",
             "params": params,
+            **self._outcome_metadata(outcome),
         }
 
     # ======================== 数据库模板（个人模板）生成 ========================
@@ -369,6 +375,8 @@ class PosterService:
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
         brand_kit: Optional[Any] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
     ) -> Dict[str, Any]:
         """
         使用数据库中的个人模板生成海报
@@ -438,24 +446,23 @@ class PosterService:
                 ai_prompt += f"\n\n请参考上传的 {len(input_images_base64)} 张图片的主体信息、构图关系或二维码内容进行创作。"
 
         # 6. 调用 AI 生成
-        image_base64 = await self._call_ai_image_api(
-            ai_prompt,
-            input_image_base64=input_image_base64,
+        outcome = await self._generate_image_outcome(
+            prompt=ai_prompt,
+            mode="template",
             input_images_base64=input_images_base64,
             provider_override=provider_override,
             image_model_config=image_model_config,
             aspect_ratio=effective_ratio,
+            primary_model_ref=primary_model_ref,
+            generation_context=generation_context,
         )
 
-        if not image_base64:
-            return {
-                "success": False,
-                "error": "AI 图片生成失败，请稍后重试",
-                "prompt_used": ai_prompt,
-            }
-
         # 7. 保存图片
-        image_url = self._save_image(image_base64, prefix="poster_tpl", brand_kit=brand_kit)
+        image_url = self._save_image(
+            outcome.image_base64,
+            prefix="poster_tpl",
+            brand_kit=brand_kit,
+        )
 
         return {
             "success": True,
@@ -467,6 +474,7 @@ class PosterService:
             "height": ratio_info["height"],
             "mode": "template",
             "params": params,
+            **self._outcome_metadata(outcome),
         }
 
     # ======================== 以图改图 ========================
@@ -478,6 +486,8 @@ class PosterService:
         aspect_ratio: str = "3:4",
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
     ) -> Dict[str, Any]:
         """
         以图改图 — 上传原始图片 + 编辑指令，AI 修改图片内容
@@ -494,21 +504,18 @@ class PosterService:
         enhanced_prompt = self._build_edit_prompt(edit_prompt, aspect_ratio)
         ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
 
-        image_result_base64 = await self._call_ai_image_api(
-            enhanced_prompt, input_image_base64=image_base64,
+        outcome = await self._generate_image_outcome(
+            prompt=enhanced_prompt,
+            mode="edit",
+            input_images_base64=[image_base64],
             provider_override=provider_override,
             image_model_config=image_model_config,
             aspect_ratio=aspect_ratio,
+            primary_model_ref=primary_model_ref,
+            generation_context=generation_context,
         )
 
-        if not image_result_base64:
-            return {
-                "success": False,
-                "error": "AI 图片编辑失败，请稍后重试",
-                "prompt_used": enhanced_prompt,
-            }
-
-        image_url = self._save_image(image_result_base64, prefix="poster_edit")
+        image_url = self._save_image(outcome.image_base64, prefix="poster_edit")
 
         return {
             "success": True,
@@ -518,6 +525,7 @@ class PosterService:
             "width": ratio_info["width"],
             "height": ratio_info["height"],
             "mode": "edit",
+            **self._outcome_metadata(outcome),
         }
 
     # ======================== 风格迁移 ========================
@@ -530,6 +538,8 @@ class PosterService:
         aspect_ratio: str = "3:4",
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
     ) -> Dict[str, Any]:
         """
         风格迁移 — 将原始图片转换为目标风格
@@ -549,22 +559,18 @@ class PosterService:
         )
         ratio_info = ASPECT_RATIOS.get(aspect_ratio, ASPECT_RATIOS["3:4"])
 
-        style_names = ", ".join(style_tags)
-        image_result_base64 = await self._call_ai_image_api(
-            enhanced_prompt, input_image_base64=image_base64,
+        outcome = await self._generate_image_outcome(
+            prompt=enhanced_prompt,
+            mode="style_transfer",
+            input_images_base64=[image_base64],
             provider_override=provider_override,
             image_model_config=image_model_config,
             aspect_ratio=aspect_ratio,
+            primary_model_ref=primary_model_ref,
+            generation_context=generation_context,
         )
 
-        if not image_result_base64:
-            return {
-                "success": False,
-                "error": "AI 风格迁移失败，请稍后重试",
-                "prompt_used": enhanced_prompt,
-            }
-
-        image_url = self._save_image(image_result_base64, prefix="poster_style")
+        image_url = self._save_image(outcome.image_base64, prefix="poster_style")
 
         return {
             "success": True,
@@ -576,6 +582,7 @@ class PosterService:
             "mode": "style_transfer",
             "style_tags": style_tags,
             "strength": strength,
+            **self._outcome_metadata(outcome),
         }
 
     # ======================== 局部重绘 (Inpaint) ========================
@@ -588,6 +595,8 @@ class PosterService:
         aspect_ratio: str = "3:4",
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
     ) -> Dict[str, Any]:
         """
         局部重绘 — 根据遮罩区域和文字提示替换指定区域内容
@@ -604,19 +613,21 @@ class PosterService:
         try:
             enhanced_prompt = self._build_inpaint_prompt(inpaint_prompt, aspect_ratio)
 
-            image_result = await self._call_ai_image_api(
-                enhanced_prompt,
-                input_image_base64=image_base64,
+            outcome = await self._generate_image_outcome(
+                prompt=enhanced_prompt,
+                mode="inpaint",
+                input_images_base64=[image_base64],
                 mask_image_base64=mask_base64,
                 provider_override=provider_override,
                 image_model_config=image_model_config,
                 aspect_ratio=aspect_ratio,
+                primary_model_ref=primary_model_ref,
+                generation_context=generation_context,
             )
 
-            if not image_result:
-                return {"success": False, "error": "AI 局部重绘失败，未返回图片数据"}
-
-            image_url = self._save_image(image_result, prefix="poster_inpaint")
+            image_url = self._save_image(
+                outcome.image_base64, prefix="poster_inpaint"
+            )
 
             return {
                 "success": True,
@@ -624,11 +635,13 @@ class PosterService:
                 "mode": "inpaint",
                 "aspect_ratio": aspect_ratio,
                 "ai_prompt": enhanced_prompt,
+                **self._outcome_metadata(outcome),
             }
 
-        except Exception as e:
-            print(f"[PosterService] 局部重绘异常: {e}")
-            return {"success": False, "error": f"局部重绘失败: {str(e)}"}
+        except ImageGenerationError as exc:
+            return {"success": False, "error": exc.safe_message}
+        except Exception:
+            return {"success": False, "error": "局部重绘失败，请稍后重试"}
 
     async def generate_erase(
         self,
@@ -636,6 +649,8 @@ class PosterService:
         mask_base64: str,
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
     ) -> Dict[str, Any]:
         """
         智能擦除 — 擦除遮罩区域的内容并自动补全背景
@@ -650,29 +665,33 @@ class PosterService:
         try:
             erase_prompt = self._build_erase_prompt()
 
-            image_result = await self._call_ai_image_api(
-                erase_prompt,
-                input_image_base64=image_base64,
+            outcome = await self._generate_image_outcome(
+                prompt=erase_prompt,
+                mode="erase",
+                input_images_base64=[image_base64],
                 mask_image_base64=mask_base64,
                 provider_override=provider_override,
                 image_model_config=image_model_config,
+                primary_model_ref=primary_model_ref,
+                generation_context=generation_context,
             )
 
-            if not image_result:
-                return {"success": False, "error": "AI 智能擦除失败，未返回图片数据"}
-
-            image_url = self._save_image(image_result, prefix="poster_erase")
+            image_url = self._save_image(
+                outcome.image_base64, prefix="poster_erase"
+            )
 
             return {
                 "success": True,
                 "image_url": image_url,
                 "mode": "erase",
                 "ai_prompt": erase_prompt,
+                **self._outcome_metadata(outcome),
             }
 
-        except Exception as e:
-            print(f"[PosterService] 智能擦除异常: {e}")
-            return {"success": False, "error": f"智能擦除失败: {str(e)}"}
+        except ImageGenerationError as exc:
+            return {"success": False, "error": exc.safe_message}
+        except Exception:
+            return {"success": False, "error": "智能擦除失败，请稍后重试"}
 
     # ======================== 多尺寸适配 (Adapt / Outpaint) ========================
 
@@ -685,6 +704,8 @@ class PosterService:
         outpaint_prompt: Optional[str] = None,
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
     ) -> Dict[str, Any]:
         """
         将图片从源比例适配到目标比例
@@ -712,17 +733,21 @@ class PosterService:
                 )
 
             # 调用 AI API（传入原图）
-            image_result = await self._call_ai_image_api(
-                prompt, input_image_base64=image_base64,
+            outcome = await self._generate_image_outcome(
+                prompt=prompt,
+                mode="adapt",
+                input_images_base64=[image_base64],
                 provider_override=provider_override,
                 image_model_config=image_model_config,
                 aspect_ratio=target_ratio,
+                primary_model_ref=primary_model_ref,
+                generation_context=generation_context,
             )
 
-            if not image_result:
-                return {"success": False, "error": "AI 尺寸适配失败，未返回图片数据"}
-
-            image_url = self._save_image(image_result, prefix=f"poster_adapt_{strategy}")
+            image_url = self._save_image(
+                outcome.image_base64,
+                prefix=f"poster_adapt_{strategy}",
+            )
             target_info = ASPECT_RATIOS[target_ratio]
 
             return {
@@ -733,11 +758,13 @@ class PosterService:
                 "width": target_info["width"],
                 "height": target_info["height"],
                 "ai_prompt": prompt,
+                **self._outcome_metadata(outcome),
             }
 
-        except Exception as e:
-            print(f"[PosterService] 尺寸适配异常: {e}")
-            return {"success": False, "error": f"尺寸适配失败: {str(e)}"}
+        except ImageGenerationError as exc:
+            return {"success": False, "error": exc.safe_message}
+        except Exception:
+            return {"success": False, "error": "尺寸适配失败，请稍后重试"}
 
     async def generate_export_all(
         self,
@@ -747,6 +774,8 @@ class PosterService:
         outpaint_prompt: Optional[str] = None,
         provider_override: Optional[str] = None,
         image_model_config: Optional[Dict[str, Any]] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
     ) -> Dict[str, Any]:
         """
         全平台一键导出 — 并发适配为所有不同于源比例的目标尺寸
@@ -779,6 +808,17 @@ class PosterService:
                     outpaint_prompt=outpaint_prompt,
                     provider_override=provider_override,
                     image_model_config=image_model_config,
+                    primary_model_ref=primary_model_ref,
+                    generation_context=(
+                        GenerationContext(
+                            chain_id=generation_context.chain_id,
+                            task_id=generation_context.task_id,
+                            item_id=ratio,
+                            user_id=generation_context.user_id,
+                        )
+                        if generation_context
+                        else None
+                    ),
                 )
 
         # 并发执行所有适配任务
@@ -791,13 +831,17 @@ class PosterService:
         errors = []
         for ratio, res in zip(target_ratios, results):
             if isinstance(res, Exception):
-                errors.append(f"{ratio}: {str(res)}")
+                errors.append(f"{ratio}: 图片生成失败，请稍后重试")
             elif res.get("success"):
                 images.append({
                     "url": res["image_url"],
                     "ratio": ratio,
                     "width": res.get("width"),
                     "height": res.get("height"),
+                    "degraded": bool(res.get("degraded", False)),
+                    "requested_model_name": res.get("requested_model_name"),
+                    "actual_model_name": res.get("actual_model_name"),
+                    "fallback_attempts": int(res.get("fallback_attempts", 0)),
                 })
             else:
                 errors.append(f"{ratio}: {res.get('error', '未知错误')}")
@@ -807,6 +851,9 @@ class PosterService:
             "mode": "export_all",
             "images": images,
             "total": len(images),
+            "degraded_count": sum(
+                1 for image in images if image.get("degraded")
+            ),
             "errors": errors if errors else None,
         }
 
@@ -1117,6 +1164,65 @@ class PosterService:
             invoke=invoke,
             context=context,
         )
+
+    async def _generate_image_outcome(
+        self,
+        *,
+        prompt: str,
+        mode: str,
+        input_images_base64: Optional[List[str]] = None,
+        mask_image_base64: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+        provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
+        primary_model_ref: Optional[ImageModelRef] = None,
+        generation_context: Optional[GenerationContext] = None,
+    ) -> GenerationOutcome:
+        """生成图片并统一返回模型来源元数据。"""
+        if primary_model_ref is not None:
+            return await self.generate_image_with_fallback(
+                prompt=prompt,
+                primary_ref=primary_model_ref,
+                context=generation_context
+                or GenerationContext(chain_id=str(uuid.uuid4())),
+                mode=mode,
+                reference_images_base64=input_images_base64,
+                mask_image_base64=mask_image_base64,
+                aspect_ratio=aspect_ratio,
+            )
+
+        image = await self._call_ai_image_api(
+            prompt,
+            input_image_base64=(
+                input_images_base64[0] if input_images_base64 else None
+            ),
+            input_images_base64=input_images_base64,
+            mask_image_base64=mask_image_base64,
+            provider_override=provider_override,
+            image_model_config=image_model_config,
+            aspect_ratio=aspect_ratio,
+        )
+        model_name = (
+            (image_model_config or {}).get("name")
+            or provider_override
+            or self.provider
+        )
+        return GenerationOutcome(
+            image_base64=image,
+            degraded=False,
+            requested_model_name=model_name,
+            actual_model_name=model_name,
+            fallback_attempts=0,
+        )
+
+    @staticmethod
+    def _outcome_metadata(outcome: GenerationOutcome) -> Dict[str, Any]:
+        return {
+            "degraded": outcome.degraded,
+            "requested_model_name": outcome.requested_model_name,
+            "actual_model_name": outcome.actual_model_name,
+            "fallback_attempts": outcome.fallback_attempts,
+        }
 
     async def _call_ai_image_api(
         self, prompt: str,

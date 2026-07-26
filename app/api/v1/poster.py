@@ -2,6 +2,7 @@
 海报/封面生成 API 路由
 提供自定义生成、模板生成、模板/风格查询等接口
 """
+import uuid
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field
@@ -13,10 +14,11 @@ from app.dependencies.auth import get_current_user, get_current_user_optional
 from app.models.user import User
 from app.services.brand_service import brand_service
 from app.services.image_fallback_service import (
+    GenerationContext,
     ImageModelRef,
-    resolve_runtime_config_with_session,
 )
 from app.services.image_model_service import image_model_service
+from app.services.image_generation_errors import ImageGenerationError
 from app.services.poster_service import poster_service
 from app.services.gallery_service import gallery_service
 from app.services.profile_service import profile_service
@@ -78,6 +80,14 @@ class GenerateResponse(BaseModel):
     template_name: Optional[str] = Field(None, description="使用的模板名称")
     style_tags: Optional[List[str]] = Field(None, description="使用的风格标签")
     strength: Optional[str] = Field(None, description="迁移强度")
+    degraded: bool = Field(False, description="是否使用了降级模型")
+    requested_model_name: Optional[str] = Field(
+        None, description="用户请求的模型"
+    )
+    actual_model_name: Optional[str] = Field(
+        None, description="实际完成生成的模型"
+    )
+    fallback_attempts: int = Field(0, description="备用模型尝试次数")
     error: Optional[str] = Field(None, description="错误信息")
 
 
@@ -192,17 +202,13 @@ async def _get_user_image_model_config(
     return await _get_user_model_ref(db, user, provider)
 
 
-async def _resolve_model_runtime(model_ref: ImageModelRef) -> Dict[str, Any]:
-    return await resolve_runtime_config_with_session(model_ref)
-
-
 async def _prepare_sync_generation(
     db: AsyncSession,
     user: Optional[User],
     *,
     include_brand: bool = False,
 ) -> Dict[str, Any]:
-    """读取请求级配置后释放请求连接，再解析本次生成所需运行时配置。"""
+    """读取请求级配置后释放请求连接，仅返回可安全传递的模型引用。"""
     user_id = user.id if user is not None else None
     brand_kit = None
     if include_brand:
@@ -215,12 +221,24 @@ async def _prepare_sync_generation(
 
     # 上述操作均为只读查询；结束事务后，第三方请求不会占用连接池连接。
     await db.rollback()
-    model_runtime = await _resolve_model_runtime(model_ref)
     return {
         "user_id": user_id,
         "brand_kit": brand_kit,
-        "model_runtime": model_runtime,
+        "model_ref": model_ref,
     }
+
+
+def _new_generation_context(user_id: Optional[Any]) -> GenerationContext:
+    return GenerationContext(
+        chain_id=str(uuid.uuid4()),
+        user_id=str(user_id) if user_id else None,
+    )
+
+
+def _safe_generation_error(exc: Exception, fallback: str) -> str:
+    if isinstance(exc, ImageGenerationError):
+        return exc.safe_message
+    return fallback
 
 
 # ======================== 查询接口 ========================
@@ -351,15 +369,16 @@ async def generate_custom(
             current_user,
             include_brand=True,
         )
-        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_custom(
             prompt=req.prompt,
             style_tags=req.style_tags,
             aspect_ratio=req.aspect_ratio,
             color_tone=req.color_tone,
             reference_images=[image.model_dump() for image in (req.reference_images or [])],
-            provider_override=model_runtime.get("provider_override"),
-            image_model_config=model_runtime.get("image_model_config"),
+            primary_model_ref=generation_context["model_ref"],
+            generation_context=_new_generation_context(
+                generation_context["user_id"]
+            ),
             brand_kit=generation_context["brand_kit"],
         )
         request_payload = req.model_dump()
@@ -378,7 +397,7 @@ async def generate_custom(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"海报生成失败: {str(e)}",
+            detail=_safe_generation_error(e, "海报生成失败，请稍后重试"),
         ) from e
 
 
@@ -414,8 +433,6 @@ async def generate_from_template(
             current_user,
             include_brand=True,
         )
-        model_runtime = generation_context["model_runtime"]
-
         # 用数据库模板的 config 调用生成
         result = await poster_service.generate_from_db_template(
             template_config=template_data["config"],
@@ -425,8 +442,10 @@ async def generate_from_template(
             style_tag=req.style_tag,
             color_option=req.color_option,
             aspect_ratio=req.aspect_ratio,
-            provider_override=model_runtime.get("provider_override"),
-            image_model_config=model_runtime.get("image_model_config"),
+            primary_model_ref=generation_context["model_ref"],
+            generation_context=_new_generation_context(
+                generation_context["user_id"]
+            ),
             brand_kit=generation_context["brand_kit"],
         )
 
@@ -441,7 +460,7 @@ async def generate_from_template(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"模板生成失败: {str(e)}",
+            detail=_safe_generation_error(e, "模板生成失败，请稍后重试"),
         ) from e
 
 
@@ -460,13 +479,14 @@ async def generate_edit(
     """
     try:
         generation_context = await _prepare_sync_generation(db, current_user)
-        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_edit(
             image_base64=req.image_base64,
             edit_prompt=req.edit_prompt,
             aspect_ratio=req.aspect_ratio,
-            provider_override=model_runtime.get("provider_override"),
-            image_model_config=model_runtime.get("image_model_config"),
+            primary_model_ref=generation_context["model_ref"],
+            generation_context=_new_generation_context(
+                generation_context["user_id"]
+            ),
         )
         await _auto_save_generation(
             user_id=generation_context["user_id"],
@@ -478,7 +498,7 @@ async def generate_edit(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"以图改图失败: {str(e)}",
+            detail=_safe_generation_error(e, "以图改图失败，请稍后重试"),
         ) from e
 
 
@@ -498,14 +518,15 @@ async def generate_style_transfer(
     """
     try:
         generation_context = await _prepare_sync_generation(db, current_user)
-        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_style_transfer(
             image_base64=req.image_base64,
             style_tags=req.style_tags,
             strength=req.strength,
             aspect_ratio=req.aspect_ratio,
-            provider_override=model_runtime.get("provider_override"),
-            image_model_config=model_runtime.get("image_model_config"),
+            primary_model_ref=generation_context["model_ref"],
+            generation_context=_new_generation_context(
+                generation_context["user_id"]
+            ),
         )
         await _auto_save_generation(
             user_id=generation_context["user_id"],
@@ -517,7 +538,7 @@ async def generate_style_transfer(
     except Exception as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"风格迁移失败: {str(e)}",
+            detail=_safe_generation_error(e, "风格迁移失败，请稍后重试"),
         ) from e
 
 
@@ -552,14 +573,15 @@ async def generate_inpaint(
     """
     try:
         generation_context = await _prepare_sync_generation(db, current_user)
-        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_inpaint(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
             inpaint_prompt=req.inpaint_prompt,
             aspect_ratio=req.aspect_ratio,
-            provider_override=model_runtime.get("provider_override"),
-            image_model_config=model_runtime.get("image_model_config"),
+            primary_model_ref=generation_context["model_ref"],
+            generation_context=_new_generation_context(
+                generation_context["user_id"]
+            ),
         )
         await _auto_save_generation(
             user_id=generation_context["user_id"],
@@ -569,7 +591,10 @@ async def generate_inpaint(
         )
         return GenerateResponse(**result)
     except Exception as e:
-        return GenerateResponse(success=False, error=f"局部重绘失败: {str(e)}")
+        return GenerateResponse(
+            success=False,
+            error=_safe_generation_error(e, "局部重绘失败，请稍后重试"),
+        )
 
 
 @router.post("/erase", response_model=GenerateResponse, summary="智能擦除")
@@ -587,12 +612,13 @@ async def generate_erase(
     """
     try:
         generation_context = await _prepare_sync_generation(db, current_user)
-        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_erase(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
-            provider_override=model_runtime.get("provider_override"),
-            image_model_config=model_runtime.get("image_model_config"),
+            primary_model_ref=generation_context["model_ref"],
+            generation_context=_new_generation_context(
+                generation_context["user_id"]
+            ),
         )
         await _auto_save_generation(
             user_id=generation_context["user_id"],
@@ -602,7 +628,10 @@ async def generate_erase(
         )
         return GenerateResponse(**result)
     except Exception as e:
-        return GenerateResponse(success=False, error=f"智能擦除失败: {str(e)}")
+        return GenerateResponse(
+            success=False,
+            error=_safe_generation_error(e, "智能擦除失败，请稍后重试"),
+        )
 
 
 # ======================== 多尺寸适配 / 全平台导出 接口 ========================
@@ -630,6 +659,7 @@ class ExportAllResponse(BaseModel):
     mode: Optional[str] = Field(None, description="生成模式")
     images: Optional[List[Dict[str, Any]]] = Field(None, description="生成的图片列表")
     total: Optional[int] = Field(None, description="成功生成的总数")
+    degraded_count: int = Field(0, description="使用降级模型完成的图片数")
     errors: Optional[List[str]] = Field(None, description="失败的比例及错误信息")
 
 
@@ -648,15 +678,16 @@ async def generate_adapt(
     """
     try:
         generation_context = await _prepare_sync_generation(db, current_user)
-        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_adapt(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
             target_ratio=req.target_ratio,
             strategy=req.strategy,
             outpaint_prompt=req.outpaint_prompt,
-            provider_override=model_runtime.get("provider_override"),
-            image_model_config=model_runtime.get("image_model_config"),
+            primary_model_ref=generation_context["model_ref"],
+            generation_context=_new_generation_context(
+                generation_context["user_id"]
+            ),
         )
         await _auto_save_generation(
             user_id=generation_context["user_id"],
@@ -666,7 +697,10 @@ async def generate_adapt(
         )
         return GenerateResponse(**result)
     except Exception as e:
-        return GenerateResponse(success=False, error=f"尺寸适配失败: {str(e)}")
+        return GenerateResponse(
+            success=False,
+            error=_safe_generation_error(e, "尺寸适配失败，请稍后重试"),
+        )
 
 
 @router.post("/export-all", response_model=ExportAllResponse, summary="全平台一键导出")
@@ -684,14 +718,15 @@ async def generate_export_all(
     """
     try:
         generation_context = await _prepare_sync_generation(db, current_user)
-        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_export_all(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
             strategy=req.strategy,
             outpaint_prompt=req.outpaint_prompt,
-            provider_override=model_runtime.get("provider_override"),
-            image_model_config=model_runtime.get("image_model_config"),
+            primary_model_ref=generation_context["model_ref"],
+            generation_context=_new_generation_context(
+                generation_context["user_id"]
+            ),
         )
         await _auto_save_generation(
             user_id=generation_context["user_id"],
@@ -701,4 +736,12 @@ async def generate_export_all(
         )
         return ExportAllResponse(**result)
     except Exception as e:
-        return ExportAllResponse(success=False, errors=[f"全平台导出失败: {str(e)}"])
+        return ExportAllResponse(
+            success=False,
+            errors=[
+                _safe_generation_error(
+                    e,
+                    "全平台导出失败，请稍后重试",
+                )
+            ],
+        )

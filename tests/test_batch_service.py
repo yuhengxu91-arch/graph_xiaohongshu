@@ -6,8 +6,8 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 from app.models.batch_task import BatchTask, BatchTaskItem
-from app.services.image_fallback_service import ImageModelRef
-from app.services.batch_service import BatchService, _tasks
+from app.services.image_fallback_service import GenerationOutcome, ImageModelRef
+from app.services.batch_service import BatchService, _tasks, poster_service
 
 
 class BatchFallbackModelTests(unittest.TestCase):
@@ -179,22 +179,26 @@ class BatchServiceTemplateTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn("base_url", serialized)
         self.assertNotIn("secret-value", serialized)
 
-    async def test_runtime_model_is_resolved_before_primary_only_generation(self):
+    async def test_safe_model_ref_is_passed_to_fallback_generation(self):
         service = BatchService()
         service._persist_task_create = AsyncMock()
         service._sync_task_state = AsyncMock()
         service._save_single_output = AsyncMock()
-        runtime = {
-            "provider_override": None,
-            "image_model_config": {
-                "provider_type": "openai_image",
-                "api_key": "secret-value",
-                "base_url": "https://images.example.test",
-                "model_name": "gpt-image-2",
-            },
-        }
+        model_ref = ImageModelRef(
+            source="builtin",
+            display_name="系统 Gemini",
+            provider="gemini",
+        )
         generate = AsyncMock(
-            return_value={"success": True, "image_url": "/static/custom.png", "prompt_used": "p"}
+            return_value={
+                "success": True,
+                "image_url": "/static/custom.png",
+                "prompt_used": "p",
+                "degraded": True,
+                "requested_model_name": "系统 Gemini",
+                "actual_model_name": "备用模型",
+                "fallback_attempts": 1,
+            }
         )
         result = await service.create_single_generation_task(
             mode="custom",
@@ -202,24 +206,21 @@ class BatchServiceTemplateTests(unittest.IsolatedAsyncioTestCase):
             runtime_input={},
             shared_config={
                 "aspect_ratio": "3:4",
-                "model_ref": ImageModelRef(
-                    source="builtin",
-                    display_name="系统 Gemini",
-                    provider="gemini",
-                ).to_dict(),
+                "model_ref": model_ref.to_dict(),
             },
         )
 
-        with patch.object(service, "_resolve_task_runtime_config", AsyncMock(return_value=runtime)):
-            with patch(
-                "app.services.batch_service.poster_service.generate_custom",
-                generate,
-            ):
-                await service.run_single_generation_task(result["task_id"])
+        with patch(
+            "app.services.batch_service.poster_service.generate_custom",
+            generate,
+        ):
+            await service.run_single_generation_task(result["task_id"])
 
         self.assertEqual(generate.await_count, 1)
-        self.assertEqual(generate.await_args.kwargs["image_model_config"]["api_key"], "secret-value")
-        self.assertNotIn("secret-value", json.dumps(_tasks[result["task_id"]]["shared_config"]))
+        self.assertEqual(generate.await_args.kwargs["primary_model_ref"], model_ref)
+        status = service.get_batch_status(result["task_id"])
+        self.assertEqual(status["degraded_count"], 1)
+        self.assertEqual(status["items"][0]["actual_model_name"], "备用模型")
 
     async def test_append_batch_items_adds_pending_items(self):
         service = BatchService()
@@ -360,7 +361,103 @@ class BatchServiceTemplateTests(unittest.IsolatedAsyncioTestCase):
 
         status = service.get_batch_status(result["task_id"])
         self.assertEqual(status["status"], "failed")
-        self.assertEqual(status["items"][0]["error_message"], "第三方 503")
+        self.assertEqual(status["items"][0]["error_message"], "图片生成失败，请重试")
+
+    async def test_local_save_failure_does_not_repeat_provider_generation(self):
+        service = BatchService()
+        service._persist_task_create = AsyncMock()
+        service._sync_task_state = AsyncMock()
+        service._save_batch_output = AsyncMock()
+        model_ref = ImageModelRef(
+            source="builtin",
+            display_name="系统 Gemini",
+            provider="gemini",
+        )
+        generate = AsyncMock(
+            return_value=GenerationOutcome(
+                image_base64="AAAA",
+                degraded=False,
+                requested_model_name="系统 Gemini",
+                actual_model_name="系统 Gemini",
+                fallback_attempts=0,
+            )
+        )
+        result = await service.create_batch_task(
+            [{"prompt": "测试"}],
+            {
+                "mode": "custom",
+                "aspect_ratio": "3:4",
+                "model_ref": model_ref.to_dict(),
+            },
+        )
+
+        with patch.object(
+            poster_service,
+            "generate_image_with_fallback",
+            generate,
+        ):
+            with patch.object(
+                poster_service,
+                "_save_image",
+                MagicMock(side_effect=OSError("disk path leaked")),
+            ):
+                await service.run_batch_task(result["task_id"])
+
+        self.assertEqual(generate.await_count, 1)
+        status = service.get_batch_status(result["task_id"])
+        self.assertEqual(status["status"], "failed")
+        self.assertEqual(
+            status["items"][0]["error_message"],
+            "图片生成失败，请重试",
+        )
+
+    async def test_retry_restarts_from_original_model_ref(self):
+        service = BatchService()
+        service._persist_task_create = AsyncMock()
+        service._sync_task_state = AsyncMock()
+        service._save_single_output = AsyncMock()
+        model_ref = ImageModelRef(
+            source="builtin",
+            display_name="系统 Gemini",
+            provider="gemini",
+        )
+        generate = AsyncMock(
+            side_effect=[
+                {"success": False, "error": "temporary"},
+                {
+                    "success": True,
+                    "image_url": "/static/retry.png",
+                    "prompt_used": "p",
+                    "degraded": False,
+                    "requested_model_name": "系统 Gemini",
+                    "actual_model_name": "系统 Gemini",
+                    "fallback_attempts": 0,
+                },
+            ]
+        )
+        result = await service.create_single_generation_task(
+            mode="custom",
+            params={"prompt": "测试"},
+            runtime_input={},
+            shared_config={
+                "aspect_ratio": "3:4",
+                "model_ref": model_ref.to_dict(),
+            },
+        )
+
+        with patch(
+            "app.services.batch_service.poster_service.generate_custom",
+            generate,
+        ):
+            await service.run_single_generation_task(result["task_id"])
+            await service.retry_failed_items(result["task_id"])
+
+        self.assertEqual(generate.await_count, 2)
+        for call in generate.await_args_list:
+            self.assertEqual(call.kwargs["primary_model_ref"], model_ref)
+        status = service.get_batch_status(result["task_id"])
+        self.assertEqual(status["status"], "completed")
+        self.assertEqual(status["items"][0]["fallback_attempts"], 0)
 
     async def test_append_during_template_batch_finalization_is_not_lost(self):
         service = BatchService()

@@ -14,13 +14,19 @@ from uuid import UUID
 
 from app.core.db import async_session_factory
 from app.models.batch_task import BatchTask, BatchTaskItem
-from app.services.image_fallback_service import resolve_runtime_config_with_session
+from app.services.image_fallback_service import (
+    GenerationContext,
+    ImageModelRef,
+    resolve_runtime_config_with_session,
+)
+from app.services.image_generation_errors import ImageGenerationError
 from app.services.gallery_service import gallery_service
 from app.services.poster_service import poster_service
 
 
 _tasks: Dict[str, Dict[str, Any]] = {}
 MAX_CONCURRENT = 3
+SAFE_GENERATION_ERROR = "图片生成失败，请重试"
 
 
 class BatchService:
@@ -138,6 +144,10 @@ class BatchService:
             "ai_prompt_used": None,
             "error_message": None,
             "retry_count": 0,
+            "degraded": False,
+            "requested_model_name": None,
+            "actual_model_name": None,
+            "fallback_attempts": 0,
             "started_at": None,
             "completed_at": None,
         }
@@ -209,7 +219,8 @@ class BatchService:
             mode = task.get("single_mode")
             params = item["item_params"]
             runtime_input = item.get("runtime_input") or {}
-            model_runtime = await self._resolve_task_runtime_config(config)
+            primary_ref = self._task_model_ref(config)
+            context = self._generation_context(task, item)
 
             if mode == "custom":
                 result = await poster_service.generate_custom(
@@ -218,8 +229,8 @@ class BatchService:
                     aspect_ratio=config.get("aspect_ratio", "3:4"),
                     color_tone=config.get("color_tone"),
                     reference_images=runtime_input.get("reference_images"),
-                    provider_override=model_runtime.get("provider_override"),
-                    image_model_config=model_runtime.get("image_model_config"),
+                    primary_model_ref=primary_ref,
+                    generation_context=context,
                     brand_kit=config.get("brand_kit"),
                 )
             elif mode == "edit":
@@ -227,8 +238,8 @@ class BatchService:
                     image_base64=runtime_input.get("image_base64", ""),
                     edit_prompt=params.get("edit_prompt", ""),
                     aspect_ratio=config.get("aspect_ratio", "3:4"),
-                    provider_override=model_runtime.get("provider_override"),
-                    image_model_config=model_runtime.get("image_model_config"),
+                    primary_model_ref=primary_ref,
+                    generation_context=context,
                 )
             else:
                 raise RuntimeError(f"不支持的单张生成模式: {mode}")
@@ -238,12 +249,13 @@ class BatchService:
 
             item["image_url"] = result.get("image_url")
             item["ai_prompt_used"] = result.get("prompt_used")
+            self._apply_generation_metadata(item, result)
             item["status"] = "success"
             await self._save_single_output(task, item, config, result)
 
         except Exception as exc:
             item["status"] = "failed"
-            item["error_message"] = str(exc)
+            item["error_message"] = self._safe_error_message(exc)
 
         finally:
             item["completed_at"] = datetime.utcnow().isoformat()
@@ -416,21 +428,21 @@ class BatchService:
                 )
 
             item["ai_prompt_used"] = enhanced_prompt
-            model_runtime = await self._resolve_task_runtime_config(config)
-            image_base64 = await poster_service._call_ai_image_api(
-                enhanced_prompt,
-                provider_override=model_runtime.get("provider_override"),
-                image_model_config=model_runtime.get("image_model_config"),
+            outcome = await poster_service.generate_image_with_fallback(
+                prompt=enhanced_prompt,
+                primary_ref=self._task_model_ref(config),
+                context=self._generation_context(task, item),
+                mode="custom",
+                aspect_ratio=config.get("aspect_ratio", "3:4"),
             )
-            if not image_base64:
-                raise RuntimeError("AI 图片生成返回空结果")
 
             image_url = poster_service._save_image(
-                image_base64,
+                outcome.image_base64,
                 prefix="poster_batch",
                 brand_kit=config.get("brand_kit"),
             )
             item["image_url"] = image_url
+            self._apply_generation_metadata(item, outcome)
             item["status"] = "success"
 
             if is_anchor:
@@ -440,7 +452,7 @@ class BatchService:
 
         except Exception as exc:
             item["status"] = "failed"
-            item["error_message"] = str(exc)
+            item["error_message"] = self._safe_error_message(exc)
 
         finally:
             item["completed_at"] = datetime.utcnow().isoformat()
@@ -461,7 +473,6 @@ class BatchService:
             for key, value in raw_params.items()
             if key not in {"reference_images"} and not key.startswith("_")
         }
-        model_runtime = await self._resolve_task_runtime_config(config)
         result = await poster_service.generate_from_db_template(
             template_config=config.get("template_config", {}),
             template_name=config.get("template_name") or "模板批量生成",
@@ -471,8 +482,8 @@ class BatchService:
             style_tag=config.get("style_tag"),
             color_option=config.get("color_option"),
             aspect_ratio=config.get("aspect_ratio"),
-            provider_override=model_runtime.get("provider_override"),
-            image_model_config=model_runtime.get("image_model_config"),
+            primary_model_ref=self._task_model_ref(config),
+            generation_context=self._generation_context(task, item),
             brand_kit=config.get("brand_kit"),
         )
         if not result.get("success"):
@@ -480,8 +491,63 @@ class BatchService:
 
         item["image_url"] = result.get("image_url")
         item["ai_prompt_used"] = result.get("prompt_used")
+        self._apply_generation_metadata(item, result)
         item["status"] = "success"
         await self._save_batch_output(task, item, config)
+
+    def _task_model_ref(self, config: Dict[str, Any]) -> ImageModelRef:
+        """读取任务中的安全模型引用，并兼容旧版内存任务。"""
+        model_ref = config.get("model_ref")
+        if model_ref:
+            return ImageModelRef.from_dict(model_ref)
+
+        provider = config.get("image_provider") or poster_service.provider
+        display_name = {
+            "gemini": "Gemini（系统内置）",
+            "gemini_ch": "Gemini（changhuai）",
+            "gpt_image": "GPT Image（系统内置）",
+            "doubao": "豆包 Seedream",
+        }.get(provider, str(provider))
+        return ImageModelRef(
+            source="builtin",
+            provider=provider,
+            display_name=display_name,
+        )
+
+    @staticmethod
+    def _generation_context(
+        task: Dict[str, Any],
+        item: Dict[str, Any],
+    ) -> GenerationContext:
+        return GenerationContext(
+            chain_id=task["id"],
+            task_id=task["id"],
+            item_id=item["id"],
+            user_id=task.get("user_id"),
+        )
+
+    @staticmethod
+    def _apply_generation_metadata(
+        item: Dict[str, Any],
+        result: Any,
+    ) -> None:
+        def value(name: str, default: Any) -> Any:
+            if isinstance(result, dict):
+                return result.get(name, default)
+            return getattr(result, name, default)
+
+        item["degraded"] = bool(value("degraded", False))
+        item["requested_model_name"] = value(
+            "requested_model_name", None
+        )
+        item["actual_model_name"] = value("actual_model_name", None)
+        item["fallback_attempts"] = int(value("fallback_attempts", 0) or 0)
+
+    @staticmethod
+    def _safe_error_message(exc: Exception) -> str:
+        if isinstance(exc, ImageGenerationError):
+            return exc.safe_message
+        return SAFE_GENERATION_ERROR
 
     async def _resolve_task_runtime_config(
         self,
@@ -529,6 +595,11 @@ class BatchService:
             "success_count": task["success_count"],
             "failed_count": task["failed_count"],
             "running_count": task["running_count"],
+            "degraded_count": sum(
+                1
+                for item in task["items"]
+                if item["status"] == "success" and item.get("degraded")
+            ),
             "series_mode": task["shared_config"].get("series_mode", False),
             "created_at": task["created_at"],
             "started_at": task["started_at"],
@@ -540,6 +611,12 @@ class BatchService:
                     "status": it["status"],
                     "image_url": it["image_url"],
                     "error_message": it["error_message"],
+                    "degraded": bool(it.get("degraded", False)),
+                    "requested_model_name": it.get("requested_model_name"),
+                    "actual_model_name": it.get("actual_model_name"),
+                    "fallback_attempts": int(
+                        it.get("fallback_attempts", 0) or 0
+                    ),
                     "title": self._item_title(it["item_params"]),
                     "subtitle": it["item_params"].get("subtitle", ""),
                 }
@@ -567,6 +644,10 @@ class BatchService:
             item["status"] = "pending"
             item["error_message"] = None
             item["retry_count"] += 1
+            item["degraded"] = False
+            item["requested_model_name"] = None
+            item["actual_model_name"] = None
+            item["fallback_attempts"] = 0
 
         self._update_task_counts(task)
         task["status"] = "running"
@@ -658,6 +739,10 @@ class BatchService:
                         item_params=item["item_params"],
                         status=item["status"],
                         retry_count=item["retry_count"],
+                        degraded=item["degraded"],
+                        requested_model_name=item["requested_model_name"],
+                        actual_model_name=item["actual_model_name"],
+                        fallback_attempts=item["fallback_attempts"],
                     )
                 )
 
@@ -687,6 +772,10 @@ class BatchService:
                         item_params=item["item_params"],
                         status=item["status"],
                         retry_count=item["retry_count"],
+                        degraded=item["degraded"],
+                        requested_model_name=item["requested_model_name"],
+                        actual_model_name=item["actual_model_name"],
+                        fallback_attempts=item["fallback_attempts"],
                     )
                 )
 
@@ -720,6 +809,16 @@ class BatchService:
                 db_item.ai_prompt_used = current_item["ai_prompt_used"]
                 db_item.error_message = current_item["error_message"]
                 db_item.retry_count = current_item["retry_count"]
+                db_item.degraded = current_item["degraded"]
+                db_item.requested_model_name = current_item[
+                    "requested_model_name"
+                ]
+                db_item.actual_model_name = current_item[
+                    "actual_model_name"
+                ]
+                db_item.fallback_attempts = current_item[
+                    "fallback_attempts"
+                ]
                 db_item.started_at = self._parse_dt(current_item["started_at"])
                 db_item.completed_at = self._parse_dt(current_item["completed_at"])
 
@@ -754,6 +853,10 @@ class BatchService:
             "width": ratio_info.get("width"),
             "height": ratio_info.get("height"),
             "prompt_used": item["ai_prompt_used"],
+            "degraded": item["degraded"],
+            "requested_model_name": item["requested_model_name"],
+            "actual_model_name": item["actual_model_name"],
+            "fallback_attempts": item["fallback_attempts"],
         }
 
         async with async_session_factory() as session:
@@ -779,6 +882,10 @@ class BatchService:
             "ai_prompt_used": None,
             "error_message": None,
             "retry_count": 0,
+            "degraded": False,
+            "requested_model_name": None,
+            "actual_model_name": None,
+            "fallback_attempts": 0,
             "started_at": None,
             "completed_at": None,
         }
