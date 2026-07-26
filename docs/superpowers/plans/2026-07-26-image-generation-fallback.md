@@ -88,7 +88,18 @@ WHERE shared_config::jsonb #> '{image_model_config}' IS NOT NULL
 1. 使用 PostgreSQL dialect 编译并通过 fake connection 执行全部语句，断言包含 `::jsonb`、`::json`、令牌列和全部降级列。
 2. 使用项目测试 PostgreSQL 开启事务，插入包含 `image_model_config.api_key/base_url`、其他模型字段及其他 `shared_config` 键的任务行，执行升级语句后查询，断言只删除敏感路径；再执行一次证明幂等。覆盖空对象和缺失路径，最后回滚事务。
 
-真实 PostgreSQL 集成测试是发布门槛，不允许用 SQLite 跳过后声称迁移已验证。
+真实 PostgreSQL 集成测试只读取独立的 `TEST_DATABASE_URL`，禁止回退到 `DATABASE_URL`；未配置时测试明确失败。开发/CI 启动命令：
+
+```bash
+docker run --rm -d --name graph-fallback-test-pg \
+  -e POSTGRES_PASSWORD=test -e POSTGRES_DB=graph_fallback_test \
+  -p 55432:5432 postgres:16-alpine
+until pg_isready -h 127.0.0.1 -p 55432 -U postgres; do sleep 1; done
+TEST_DATABASE_URL=postgresql+asyncpg://postgres:test@127.0.0.1:55432/graph_fallback_test \
+  PYTHONPATH=. pytest tests/test_image_fallback_migrations.py -q
+```
+
+测试使用随机 schema，并在结束时删除；真实 PostgreSQL 集成测试是发布门槛。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -146,7 +157,7 @@ Run: `PYTHONPATH=. pytest tests/test_image_fallback_service.py tests/test_profil
 
 API 层和任务 `shared_config` 只保存 `model_ref` 的字典。先实现“只解析并调用主模型”的兼容路径：后台执行时通过独立 session 将引用解析成短生命周期 runtime config，再调用现有 `PosterService`，本任务暂不启用备用链。内置模型从环境变量解析。切换持久化格式后，现有单张和批量生成测试必须保持全绿。
 
-同步 `app/api/v1/poster.py` 路径在调用 `PosterService` 前通过请求数据库会话解析安全引用，不把 `ImageModelRef` 误传为 runtime config。增加公共模型、内置模型和系统默认三种同步 API 回归测试，本提交仍只调用主模型、不启用降级。
+同步 `app/api/v1/poster.py` 也只传安全引用。模型解析器内部使用 `async_session_factory()` 创建并立即关闭独立短生命周期 session，再把 runtime config 交给 `PosterService`；不得占用 FastAPI 请求会话等待第三方生成。增加公共模型、内置模型和系统默认三种同步 API 回归测试，本提交仍只调用主模型、不启用降级。
 
 - [ ] **Step 4: 增加密钥不落库测试**
 
@@ -214,7 +225,7 @@ class ImageGenerationError(RuntimeError):
 
 适配器成功返回有效 Base64；失败抛 `ImageGenerationError`。清除本功能涉及的三个供应商调用链中的全部 `print`，包括成功路径 URL、模型地址、提示词片段和错误响应；不得记录 URL/Base URL 或提示词。统一改用脱敏结构化 logger。`CancelledError` 不捕获。
 
-测试同时捕获 logger 和 stdout/stderr，分别覆盖成功、失败、候选跳过路径，断言无 Key、Base URL、完整响应体和提示词片段。
+测试同时捕获 logger 和 stdout/stderr，覆盖单次供应商调用的成功和失败路径，断言无 Key、Base URL、完整响应体和提示词片段。候选跳过路径在 Task 4 协调器测试中覆盖。
 
 - [ ] **Step 5: 运行测试并提交**
 
@@ -263,7 +274,8 @@ GenerationOutcome(
 ```
 
 - 所有候选失败时抛最后一个安全错误。
-- 取消发生后不再调用候选。
+- 主模型调用期间、候选切换之间、图片下载期间分别抛出 `CancelledError` 时均停止降级。
+- 候选跳过的结构化日志和 stdout/stderr 脱敏测试。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -303,6 +315,8 @@ git commit -m "feat(images): add ordered provider fallback"
 - `error_message` 只保存固定安全文案，不保存内部异常。
 - 本地 `_save_image`、品牌叠加和作品库失败不触发备用模型。
 - 重试从原主模型引用开始，并重新查询当前候选。
+- 同步 `GenerateResponse` schema 明确声明四个降级字段，并通过 API 响应测试，防止 Pydantic 丢弃字段。
+- `export_all` 的每个 `images[]` 条目独立保存四个降级字段；顶层仅提供 `degraded_count` 汇总，不用单一实际模型覆盖混合结果。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -387,11 +401,12 @@ git commit -m "fix(batch): enforce task ownership"
 - Modify: `app/services/image_model_service.py`
 - Modify: `frontend/src/components/profile/PreferenceForm.vue`
 - Modify: `frontend/src/api.js`
+- Create: `frontend/src/utils/imageModelFallbackForm.js`
 - Create: `frontend/tests/imageFallback.test.mjs`
 
 - [ ] **Step 1: 写前后端失败测试**
 
-后端验证只有管理员可写备用配置、优先级必须为正整数、能力只接受白名单字段。新增模型按 `provider_type` 获得保守默认能力并有单元测试。把表单 payload 归一化提取为可执行纯函数，测试开关关闭时清空优先级、能力白名单和支持比例；组件再保留一条入口接线回归测试。
+后端验证只有管理员可写备用配置、优先级必须为正整数、能力只接受白名单字段。新增模型按 `provider_type` 获得保守默认能力并有单元测试。`imageModelFallbackForm.js` 导出 `normalizeFallbackModelPayload()`，测试开关关闭时清空优先级、能力白名单和支持比例；组件再保留一条入口接线回归测试。
 
 - [ ] **Step 2: 运行测试确认失败**
 
@@ -432,6 +447,7 @@ git commit -m "feat(admin): configure fallback image models"
 - 批量卡片逐项显示“备用模型”标记。
 - 批量顶部显示降级数量汇总。
 - 模板批量独立结果网格显示同样的逐项标记和顶部汇总。
+- `export_all` 按每个 `images[]` 条目显示实际模型，并使用顶层 `degraded_count` 汇总。
 - 全部失败仍显示重试按钮。
 - `imageFallback.js` 的 `fallbackNotice(item)`、`countDegradedItems(items)` 用真实输入做可执行测试，证明 `degraded=false` 时不生成提示且汇总数量正确。
 
