@@ -350,23 +350,25 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
             "height": 1440,
             "mode": "custom",
         }
-        brand_service_mock = SimpleNamespace(get_brand_kit=AsyncMock(return_value=brand_kit))
-
         with patch.object(
             poster_api,
-            "_get_runtime_model_context",
-            AsyncMock(return_value={"provider_override": None, "image_model_config": None}),
+            "_prepare_sync_generation",
+            AsyncMock(return_value={
+                "brand_kit": brand_kit,
+                "model_runtime": {
+                    "provider_override": None,
+                    "image_model_config": None,
+                },
+            }),
         ):
+            with patch.object(poster_api, "_auto_save_generation", AsyncMock()):
                 with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response_payload)) as generate_mock:
-                    with patch.object(poster_api.gallery_service, "create_generation_record", AsyncMock()):
-                        with patch("app.api.v1.poster.brand_service", brand_service_mock, create=True):
-                            await poster_api.generate_custom(
-                                poster_api.CustomGenerateRequest(prompt="新品海报"),
-                                current_user=SimpleNamespace(id=uuid4()),
-                                db=object(),
-                            )
+                    await poster_api.generate_custom(
+                        poster_api.CustomGenerateRequest(prompt="新品海报"),
+                        current_user=SimpleNamespace(id=uuid4()),
+                        db=object(),
+                    )
 
-        brand_service_mock.get_brand_kit.assert_awaited_once()
         self.assertIs(generate_mock.call_args.kwargs["brand_kit"], brand_kit)
 
     async def test_custom_generation_passes_reference_images_without_saving_base64_payload(self):
@@ -383,7 +385,7 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
         }
         saved_payloads = []
 
-        async def capture_generation_record(*args, **kwargs):
+        async def capture_generation_record(**kwargs):
             saved_payloads.append(kwargs["request_payload"])
 
         request = poster_api.CustomGenerateRequest(
@@ -396,17 +398,22 @@ class PosterApiBrandKitTests(unittest.IsolatedAsyncioTestCase):
 
         with patch.object(
             poster_api,
-            "_get_runtime_model_context",
-            AsyncMock(return_value={"provider_override": None, "image_model_config": None}),
+            "_prepare_sync_generation",
+            AsyncMock(return_value={
+                "brand_kit": None,
+                "model_runtime": {
+                    "provider_override": None,
+                    "image_model_config": None,
+                },
+            }),
         ):
-            with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
-                    with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response_payload)) as generate_mock:
-                        with patch.object(poster_api.gallery_service, "create_generation_record", AsyncMock(side_effect=capture_generation_record)):
-                            await poster_api.generate_custom(
-                                request,
-                                current_user=SimpleNamespace(id=uuid4()),
-                                db=object(),
-                            )
+            with patch.object(poster_api, "_auto_save_generation", AsyncMock(side_effect=capture_generation_record)):
+                with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response_payload)) as generate_mock:
+                    await poster_api.generate_custom(
+                        request,
+                        current_user=SimpleNamespace(id=uuid4()),
+                        db=object(),
+                    )
 
         self.assertEqual(len(generate_mock.call_args.kwargs["reference_images"]), 2)
         self.assertEqual(
@@ -462,7 +469,7 @@ class PosterApiSafeModelReferenceTests(unittest.IsolatedAsyncioTestCase):
                                 await poster_api.generate_custom(
                                     poster_api.CustomGenerateRequest(prompt="测试"),
                                     current_user=SimpleNamespace(id=uuid4()),
-                                    db=object(),
+                                    db=ObservableRequestSession(),
                                 )
 
         self.assertEqual(generate.await_args.kwargs["image_model_config"]["api_key"], "secret-value")
@@ -500,7 +507,7 @@ class PosterApiSafeModelReferenceTests(unittest.IsolatedAsyncioTestCase):
                                 await poster_api.generate_custom(
                                     poster_api.CustomGenerateRequest(prompt="测试"),
                                     current_user=SimpleNamespace(id=uuid4()),
-                                    db=object(),
+                                    db=ObservableRequestSession(),
                                 )
 
         self.assertEqual(generate.await_args.kwargs["provider_override"], "doubao")
@@ -569,12 +576,198 @@ class PosterApiSafeModelReferenceTests(unittest.IsolatedAsyncioTestCase):
                                 await poster_api.generate_custom(
                                     poster_api.CustomGenerateRequest(prompt="测试"),
                                     current_user=None,
-                                    db=object(),
+                                    db=ObservableRequestSession(),
                                 )
 
         resolved_ref = resolve.await_args.args[0]
         self.assertEqual(resolved_ref.source, "config")
         self.assertEqual(resolved_ref.config_id, default_config.id)
+
+
+class ObservableRequestSession:
+    def __init__(self):
+        self.transaction_active = True
+        self.rollback = AsyncMock(side_effect=self._release)
+
+    async def _release(self):
+        self.transaction_active = False
+
+
+class IndependentSaveSession:
+    def __init__(self):
+        self.commit = AsyncMock()
+
+
+class AsyncSessionContext:
+    def __init__(self, session):
+        self.session = session
+
+    async def __aenter__(self):
+        return self.session
+
+    async def __aexit__(self, exc_type, exc, tb):
+        return False
+
+
+class PosterApiSessionLifecycleTests(unittest.IsolatedAsyncioTestCase):
+    async def test_public_builtin_and_default_contexts_release_request_transaction_before_resolution(self):
+        from app.api.v1 import poster as poster_api
+
+        refs = [
+            ImageModelRef(source="config", display_name="公共模型", config_id=uuid4()),
+            ImageModelRef(source="builtin", display_name="豆包 Seedream", provider="doubao"),
+            ImageModelRef(source="config", display_name="系统默认", config_id=uuid4()),
+        ]
+
+        for model_ref in refs:
+            with self.subTest(source=model_ref.source, name=model_ref.display_name):
+                request_db = ObservableRequestSession()
+
+                async def resolve(ref):
+                    self.assertIs(ref, model_ref)
+                    self.assertFalse(request_db.transaction_active)
+                    return {"provider_override": ref.provider, "image_model_config": None}
+
+                with patch.object(poster_api, "_get_user_provider", AsyncMock(return_value=None)):
+                    with patch.object(poster_api, "_get_user_model_ref", AsyncMock(return_value=model_ref)):
+                        with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
+                            with patch.object(poster_api, "_resolve_model_runtime", AsyncMock(side_effect=resolve)):
+                                context = await poster_api._prepare_sync_generation(
+                                    request_db,
+                                    user=None,
+                                    include_brand=True,
+                                )
+
+                self.assertFalse(request_db.transaction_active)
+                request_db.rollback.assert_awaited_once()
+                self.assertIn("model_runtime", context)
+
+    async def test_custom_generation_releases_request_session_and_saves_with_independent_session(self):
+        from app.api.v1 import poster as poster_api
+
+        request_db = ObservableRequestSession()
+        save_db = IndependentSaveSession()
+        model_ref = ImageModelRef(
+            source="builtin",
+            display_name="豆包 Seedream",
+            provider="doubao",
+        )
+        response = {
+            "success": True,
+            "image_url": "/static/custom.png",
+            "prompt_used": "p",
+            "aspect_ratio": "3:4",
+            "width": 1080,
+            "height": 1440,
+            "mode": "custom",
+        }
+
+        async def generate(**kwargs):
+            self.assertFalse(request_db.transaction_active)
+            return response
+
+        async def save_generation(db, **kwargs):
+            self.assertIs(db, save_db)
+            self.assertIsNot(db, request_db)
+
+        with patch.object(poster_api, "_get_user_provider", AsyncMock(return_value=None)):
+            with patch.object(poster_api, "_get_user_model_ref", AsyncMock(return_value=model_ref)):
+                with patch.object(poster_api, "_get_user_brand_kit", AsyncMock(return_value=None)):
+                    with patch.object(
+                        poster_api,
+                        "_resolve_model_runtime",
+                        AsyncMock(return_value={"provider_override": "doubao", "image_model_config": None}),
+                    ):
+                        with patch.object(
+                            poster_api.poster_service,
+                            "generate_custom",
+                            AsyncMock(side_effect=generate),
+                        ):
+                            with patch.object(
+                                poster_api.gallery_service,
+                                "create_generation_record",
+                                AsyncMock(side_effect=save_generation),
+                            ):
+                                with patch.object(
+                                    poster_api,
+                                    "async_session_factory",
+                                    MagicMock(return_value=AsyncSessionContext(save_db)),
+                                ):
+                                    await poster_api.generate_custom(
+                                        poster_api.CustomGenerateRequest(prompt="测试"),
+                                        current_user=SimpleNamespace(id=uuid4()),
+                                        db=request_db,
+                                    )
+
+        save_db.commit.assert_awaited_once()
+
+    async def test_custom_edit_and_template_share_pre_generation_entrypoint(self):
+        from app.api.v1 import poster as poster_api
+        from app.services import template_service as template_service_module
+
+        context = {
+            "brand_kit": None,
+            "model_runtime": {
+                "provider_override": "doubao",
+                "image_model_config": None,
+            },
+        }
+        response = {
+            "success": True,
+            "image_url": "/static/result.png",
+            "prompt_used": "p",
+            "aspect_ratio": "3:4",
+            "width": 1080,
+            "height": 1440,
+            "mode": "custom",
+        }
+        prepare = AsyncMock(return_value=context)
+        persist = AsyncMock()
+
+        with patch.object(poster_api, "_prepare_sync_generation", prepare):
+            with patch.object(poster_api, "_auto_save_generation", persist):
+                with patch.object(poster_api.poster_service, "generate_custom", AsyncMock(return_value=response)):
+                    await poster_api.generate_custom(
+                        poster_api.CustomGenerateRequest(prompt="测试"),
+                        current_user=None,
+                        db=object(),
+                    )
+                with patch.object(poster_api.poster_service, "generate_edit", AsyncMock(return_value=response)):
+                    await poster_api.generate_edit(
+                        poster_api.EditGenerateRequest(
+                            image_base64="AAAA",
+                            edit_prompt="测试",
+                        ),
+                        current_user=None,
+                        db=object(),
+                    )
+
+                template = SimpleNamespace(
+                    id=uuid4(),
+                    name="模板",
+                    style_tag=None,
+                    config={},
+                )
+                with patch.object(
+                    template_service_module.template_service,
+                    "get_template",
+                    AsyncMock(return_value=template),
+                ):
+                    with patch.object(
+                        poster_api.poster_service,
+                        "generate_from_db_template",
+                        AsyncMock(return_value=response),
+                    ):
+                        await poster_api.generate_from_template(
+                            poster_api.TemplateGenerateRequest(
+                                template_id=str(template.id),
+                                params={},
+                            ),
+                            current_user=None,
+                            db=object(),
+                        )
+
+        self.assertEqual(prepare.await_count, 3)
 
 
 if __name__ == "__main__":

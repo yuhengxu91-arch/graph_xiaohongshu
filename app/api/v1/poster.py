@@ -7,7 +7,7 @@ from fastapi import APIRouter, HTTPException, status, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.db import get_async_session
+from app.core.db import async_session_factory, get_async_session
 from app.core.limits import IMAGE_PROMPT_MAX_LENGTH
 from app.dependencies.auth import get_current_user, get_current_user_optional
 from app.models.user import User
@@ -101,32 +101,44 @@ class SalesSyncResponse(BaseModel):
 
 async def _auto_save_generation(
     *,
-    db: AsyncSession,
     current_user: Optional[User],
     source_mode: str,
     result: Dict[str, Any],
     request_payload: Dict[str, Any],
+    template_id: Optional[Any] = None,
 ) -> None:
-    """用户已登录时，将成功生成结果自动保存到作品库。"""
-    if not current_user or not result.get("success"):
+    """用独立短会话保存生成结果及模板使用次数。"""
+    should_save_gallery = bool(current_user and result.get("success"))
+    if not should_save_gallery and template_id is None:
         return
 
-    if source_mode == "export_all":
-        await gallery_service.create_export_all_records(
-            db,
-            user_id=current_user.id,
-            export_result=result,
-            request_payload=request_payload,
-        )
-        return
+    async with async_session_factory() as save_db:
+        if template_id is not None:
+            from app.services.template_service import template_service
 
-    await gallery_service.create_generation_record(
-        db,
-        user_id=current_user.id,
-        source_mode=source_mode,
-        generation_result=result,
-        request_payload=request_payload,
-    )
+            await template_service.increment_use_count(
+                save_db,
+                template_id=template_id,
+            )
+
+        if should_save_gallery:
+            if source_mode == "export_all":
+                await gallery_service.create_export_all_records(
+                    save_db,
+                    user_id=current_user.id,
+                    export_result=result,
+                    request_payload=request_payload,
+                )
+            else:
+                await gallery_service.create_generation_record(
+                    save_db,
+                    user_id=current_user.id,
+                    source_mode=source_mode,
+                    generation_result=result,
+                    request_payload=request_payload,
+                )
+
+        await save_db.commit()
 
 
 async def _get_user_provider(
@@ -184,13 +196,29 @@ async def _resolve_model_runtime(model_ref: ImageModelRef) -> Dict[str, Any]:
     return await resolve_runtime_config_with_session(model_ref)
 
 
-async def _get_runtime_model_context(
+async def _prepare_sync_generation(
     db: AsyncSession,
     user: Optional[User],
+    *,
+    include_brand: bool = False,
 ) -> Dict[str, Any]:
+    """读取请求级配置后释放请求连接，再解析本次生成所需运行时配置。"""
+    brand_kit = None
+    if include_brand:
+        brand_model = await _get_user_brand_kit(db, user)
+        if brand_model is not None:
+            brand_kit = brand_service.serialize(brand_model)
+
     provider = await _get_user_provider(db, user)
     model_ref = await _get_user_model_ref(db, user, provider)
-    return await _resolve_model_runtime(model_ref)
+
+    # 上述操作均为只读查询；结束事务后，第三方请求不会占用连接池连接。
+    await db.rollback()
+    model_runtime = await _resolve_model_runtime(model_ref)
+    return {
+        "brand_kit": brand_kit,
+        "model_runtime": model_runtime,
+    }
 
 
 # ======================== 查询接口 ========================
@@ -316,8 +344,12 @@ async def generate_custom(
     - AI 直接生成完整海报图片
     """
     try:
-        brand_kit = await _get_user_brand_kit(db, current_user)
-        model_runtime = await _get_runtime_model_context(db, current_user)
+        generation_context = await _prepare_sync_generation(
+            db,
+            current_user,
+            include_brand=True,
+        )
+        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_custom(
             prompt=req.prompt,
             style_tags=req.style_tags,
@@ -326,7 +358,7 @@ async def generate_custom(
             reference_images=[image.model_dump() for image in (req.reference_images or [])],
             provider_override=model_runtime.get("provider_override"),
             image_model_config=model_runtime.get("image_model_config"),
-            brand_kit=brand_kit,
+            brand_kit=generation_context["brand_kit"],
         )
         request_payload = req.model_dump()
         if req.reference_images:
@@ -335,7 +367,6 @@ async def generate_custom(
                 for index, image in enumerate(req.reference_images)
             ]
         await _auto_save_generation(
-            db=db,
             current_user=current_user,
             source_mode="custom",
             result=result,
@@ -363,9 +394,6 @@ async def generate_from_template(
     - AI 基于模板约束生成海报
     """
     try:
-        brand_kit = await _get_user_brand_kit(db, current_user)
-        model_runtime = await _get_runtime_model_context(db, current_user)
-
         # 统一通过 template_id 从数据库查找（包含个人模板和系统模板）
         from app.services.template_service import template_service
         from uuid import UUID as _UUID
@@ -373,30 +401,39 @@ async def generate_from_template(
         tpl = await template_service.get_template(db, template_id=_UUID(req.template_id))
         if not tpl:
             return GenerateResponse(success=False, error=f"模板 {req.template_id} 不存在")
+        template_data = {
+            "id": tpl.id,
+            "config": tpl.config or {},
+            "name": tpl.name,
+            "style_tag": tpl.style_tag,
+        }
+        generation_context = await _prepare_sync_generation(
+            db,
+            current_user,
+            include_brand=True,
+        )
+        model_runtime = generation_context["model_runtime"]
 
         # 用数据库模板的 config 调用生成
         result = await poster_service.generate_from_db_template(
-            template_config=tpl.config or {},
-            template_name=tpl.name,
-            template_style_tag=tpl.style_tag,
+            template_config=template_data["config"],
+            template_name=template_data["name"],
+            template_style_tag=template_data["style_tag"],
             params=req.params,
             style_tag=req.style_tag,
             color_option=req.color_option,
             aspect_ratio=req.aspect_ratio,
             provider_override=model_runtime.get("provider_override"),
             image_model_config=model_runtime.get("image_model_config"),
-            brand_kit=brand_kit,
+            brand_kit=generation_context["brand_kit"],
         )
-        
-        # 使用次数 +1
-        await template_service.increment_use_count(db, template_id=tpl.id)
 
         await _auto_save_generation(
-            db=db,
             current_user=current_user,
             source_mode="template",
             result=result,
             request_payload=req.model_dump(),
+            template_id=template_data["id"],
         )
         return GenerateResponse(**result)
     except Exception as e:
@@ -420,7 +457,8 @@ async def generate_edit(
     - AI 根据指令修改图片
     """
     try:
-        model_runtime = await _get_runtime_model_context(db, current_user)
+        generation_context = await _prepare_sync_generation(db, current_user)
+        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_edit(
             image_base64=req.image_base64,
             edit_prompt=req.edit_prompt,
@@ -429,7 +467,6 @@ async def generate_edit(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            db=db,
             current_user=current_user,
             source_mode="edit",
             result=result,
@@ -458,7 +495,8 @@ async def generate_style_transfer(
     - AI 将图片转换为目标风格
     """
     try:
-        model_runtime = await _get_runtime_model_context(db, current_user)
+        generation_context = await _prepare_sync_generation(db, current_user)
+        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_style_transfer(
             image_base64=req.image_base64,
             style_tags=req.style_tags,
@@ -468,7 +506,6 @@ async def generate_style_transfer(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            db=db,
             current_user=current_user,
             source_mode="style_transfer",
             result=result,
@@ -512,7 +549,8 @@ async def generate_inpaint(
     - AI 仅修改遮罩区域，保留其余部分不变
     """
     try:
-        model_runtime = await _get_runtime_model_context(db, current_user)
+        generation_context = await _prepare_sync_generation(db, current_user)
+        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_inpaint(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
@@ -522,7 +560,6 @@ async def generate_inpaint(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            db=db,
             current_user=current_user,
             source_mode="inpaint",
             result=result,
@@ -547,7 +584,8 @@ async def generate_erase(
     - 无需提示词
     """
     try:
-        model_runtime = await _get_runtime_model_context(db, current_user)
+        generation_context = await _prepare_sync_generation(db, current_user)
+        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_erase(
             image_base64=req.image_base64,
             mask_base64=req.mask_base64,
@@ -555,7 +593,6 @@ async def generate_erase(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            db=db,
             current_user=current_user,
             source_mode="erase",
             result=result,
@@ -608,7 +645,8 @@ async def generate_adapt(
     - AI 扩图模式下可提供补充提示词以优化扩展区域
     """
     try:
-        model_runtime = await _get_runtime_model_context(db, current_user)
+        generation_context = await _prepare_sync_generation(db, current_user)
+        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_adapt(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
@@ -619,7 +657,6 @@ async def generate_adapt(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            db=db,
             current_user=current_user,
             source_mode="adapt",
             result=result,
@@ -644,7 +681,8 @@ async def generate_export_all(
     - 返回多张适配后的图片
     """
     try:
-        model_runtime = await _get_runtime_model_context(db, current_user)
+        generation_context = await _prepare_sync_generation(db, current_user)
+        model_runtime = generation_context["model_runtime"]
         result = await poster_service.generate_export_all(
             image_base64=req.image_base64,
             source_ratio=req.source_ratio,
@@ -654,7 +692,6 @@ async def generate_export_all(
             image_model_config=model_runtime.get("image_model_config"),
         )
         await _auto_save_generation(
-            db=db,
             current_user=current_user,
             source_mode="export_all",
             result=result,
