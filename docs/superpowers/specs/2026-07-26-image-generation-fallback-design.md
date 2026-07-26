@@ -101,7 +101,7 @@
 
 运行流程：
 
-1. API 创建任务，保存主模型引用和备用模型安全引用。
+1. API 创建任务，只保存主模型引用。
 2. 后台任务根据当前模式计算所需能力。
 3. 协调器调用主模型。
 4. 若出现允许降级的故障，按优先级筛选并调用备用模型。
@@ -127,14 +127,15 @@
 2. 再参考 HTTP 状态。
 3. 最后参考网络异常类型。
 4. 无法可靠分类时设置 `retryable=false`。
+5. 只有 HTTP 500、502、503、504 属于允许降级的服务端状态；其他 5xx 按未知错误处理。
 
 逐供应商分类表：
 
 | 适配器 | 优先读取字段 | 允许降级 | 禁止降级 |
 |---|---|---|---|
-| `openai_image` | HTTP JSON 的 `error.code`、`error.type`、`error.message`；HTTP 200 时也检查根级 `error` | `rate_limit_error`、`rate_limit_exceeded`、`too_many_requests`；无业务码且 HTTP 429；HTTP 5xx | `invalid_api_key`、`authentication_error`、`permission_denied`、`insufficient_quota`、`billing_hard_limit_reached`、`account_deactivated`、`content_policy_violation`、`moderation_blocked`、`invalid_request_error`、`unsupported_*` |
-| `gemini` | 根级 `error.code/status/message`、`promptFeedback.blockReason`、候选的 `finishReason/finish_reason` 和 `safetyRatings` | `RATE_LIMIT_EXCEEDED`、`TOO_MANY_REQUESTS`；没有配额标记的 HTTP 429；HTTP 5xx；`finishReason=STOP` 且无审核信号但没有图片 | `UNAUTHENTICATED`、`PERMISSION_DENIED`、`INVALID_ARGUMENT`、`FAILED_PRECONDITION`；`SAFETY`、`PROHIBITED_CONTENT`、`BLOCKLIST`、`SPII`、`IMAGE_SAFETY`；余额/配额标记 |
-| `doubao` | 根级 `error`、`data.error`、单图 `item.error` 中的 `code/type/message` | `RateLimitExceeded`、`TooManyRequests`、`ServiceUnavailable`；没有配额标记的 HTTP 429；HTTP 5xx | `AccessDenied`、`InvalidAccessKey`、`Unauthorized`、`InvalidParameter`、`ModelNotFound`、`InsufficientBalance`、`QuotaExceeded`、`SensitiveContent`、`ContentPolicyViolation` |
+| `openai_image` | HTTP JSON 的 `error.code`、`error.type`、`error.message`；HTTP 200 时也检查根级 `error` | `rate_limit_error`、`rate_limit_exceeded`、`too_many_requests`；无业务码且 HTTP 429；HTTP 500/502/503/504 | `invalid_api_key`、`authentication_error`、`permission_denied`、`insufficient_quota`、`billing_hard_limit_reached`、`account_deactivated`、`content_policy_violation`、`moderation_blocked`、`invalid_request_error`、`unsupported_*` |
+| `gemini` | 根级 `error.code/status/message`、`promptFeedback.blockReason`、候选的 `finishReason/finish_reason` 和 `safetyRatings` | `RATE_LIMIT_EXCEEDED`、`TOO_MANY_REQUESTS`；没有配额标记的 HTTP 429；HTTP 500/502/503/504；`finishReason=STOP` 且无审核信号但没有图片 | `UNAUTHENTICATED`、`PERMISSION_DENIED`、`INVALID_ARGUMENT`、`FAILED_PRECONDITION`；`SAFETY`、`PROHIBITED_CONTENT`、`BLOCKLIST`、`SPII`、`IMAGE_SAFETY`；余额/配额标记 |
+| `doubao` | 根级 `error`、`data.error`、单图 `item.error` 中的 `code/type/message` | `RateLimitExceeded`、`TooManyRequests`、`ServiceUnavailable`；没有配额标记的 HTTP 429；HTTP 500/502/503/504 | `AccessDenied`、`InvalidAccessKey`、`Unauthorized`、`InvalidParameter`、`ModelNotFound`、`InsufficientBalance`、`QuotaExceeded`、`SensitiveContent`、`ContentPolicyViolation` |
 
 错误码比较忽略大小写、下划线和短横线差异。供应商代理返回非标准代码时，消息只用于匹配有限的安全关键词：
 
@@ -146,7 +147,7 @@
 
 第三方图片 URL 下载分类：
 
-- 连接失败、超时、HTTP 404、408、429、5xx、非图片 MIME 或图片解码失败：允许降级。
+- 连接失败、超时、HTTP 404、408、429、500、502、503、504、非图片 MIME 或图片解码失败：允许降级。
 - HTTP 400、401、403 及其他明确 4xx：禁止降级。
 - 下载响应超过图片大小上限：按供应商返回无效结果处理，允许降级。
 
@@ -205,7 +206,8 @@
 - 备用候选按重试时数据库中的启用状态和最新优先级重新解析。
 - 状态、SSE、追加条目、重试和下载接口统一执行任务访问校验。
 - 登录任务只允许任务所有者或管理员读取、监听、修改和下载。
-- 匿名任务创建时生成独立的高熵 `task_access_token`，接口只返回一次；数据库和内存任务只保存令牌哈希。匿名请求必须通过请求头提交令牌，SSE 因 EventSource 限制可通过查询参数提交。仅持有任务 UUID 不构成授权。
+- 匿名任务创建时生成独立的高熵 `task_access_token`，接口只返回一次；数据库和内存任务只保存令牌哈希。匿名请求必须通过请求头提交令牌，仅持有任务 UUID 不构成授权。
+- 匿名 SSE 不使用原生 EventSource 和 URL 查询参数，前端改用支持自定义请求头的 `fetch` 流读取 SSE，避免令牌进入代理日志、监控系统、浏览器历史和 Referer。
 - 登录用户不能仅凭任务 UUID 访问匿名任务，仍需匿名任务令牌；管理员可以访问。
 
 现有部署已经固定为单 worker，第一版明确不承诺服务重启后恢复含参考图的任务。后续如需恢复，必须把运行时图片迁移到带生命周期的对象存储并实现数据库任务领取机制，该工作不属于本次降级功能。
@@ -245,7 +247,8 @@
 
 错误分类与执行：
 
-- 连接失败、超时、临时 429、5xx、有效空结果和图片下载失败触发下一模型。
+- 连接失败、超时、临时 429、HTTP 500/502/503/504、有效空结果和图片下载失败触发下一模型。
+- HTTP 501/505/507 等其他 5xx 不降级。
 - 429 配额耗尽、审核拒绝、401/403、参数错误、能力错误和未知异常立即终止。
 - Gemini 安全结束不会被误判为普通空结果。
 - 取消发生在主调用、候选之间或下载阶段时均停止降级。
