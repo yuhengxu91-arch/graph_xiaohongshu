@@ -6,7 +6,7 @@ import asyncio
 from typing import Optional, List, Dict, Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Depends, Header
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -50,6 +50,7 @@ class BatchGenerateResponse(BaseModel):
     task_id: Optional[str] = None
     total_count: int = 0
     mode: str = "batch"
+    access_token: Optional[str] = None
     error: Optional[str] = None
 
 
@@ -62,6 +63,10 @@ class BatchItemStatus(BaseModel):
     error_message: Optional[str] = None
     title: str = ""
     subtitle: str = ""
+    degraded: bool = False
+    requested_model_name: Optional[str] = None
+    actual_model_name: Optional[str] = None
+    fallback_attempts: int = 0
 
 
 class BatchStatusResponse(BaseModel):
@@ -72,6 +77,7 @@ class BatchStatusResponse(BaseModel):
     success_count: int
     failed_count: int
     running_count: int
+    degraded_count: int = 0
     series_mode: bool = False
     created_at: Optional[str] = None
     started_at: Optional[str] = None
@@ -109,6 +115,21 @@ class BatchAppendResponse(BaseModel):
     total_count: int = 0
     should_start_worker: bool = False
     error: Optional[str] = None
+
+
+def _require_task_access(
+    task_id: str,
+    current_user: Optional[User],
+    task_token: Optional[str],
+) -> None:
+    if batch_service.can_access_task(
+        task_id,
+        user_id=current_user.id if current_user else None,
+        is_admin=bool(current_user and current_user.is_admin),
+        access_token=task_token,
+    ):
+        return
+    raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
 
 
 class SingleReferenceImage(BaseModel):
@@ -240,6 +261,7 @@ async def template_batch_generate(
             task_id=result["task_id"],
             total_count=result["total_count"],
             mode="batch",
+            access_token=result.get("access_token"),
         )
     except HTTPException:
         raise
@@ -259,10 +281,16 @@ async def append_template_batch_items(
     task_id: str,
     req: TemplateBatchGenerateRequest,
     background_tasks: BackgroundTasks,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    task_token: Optional[str] = Header(
+        default=None,
+        alias="X-Task-Access-Token",
+    ),
 ):
     """
     向已有模板批量任务追加条目；如果任务已结束，会重新启动同一个任务继续处理新条目。
     """
+    _require_task_access(task_id, current_user, task_token)
     result = await batch_service.append_batch_items(
         task_id,
         _template_batch_items(req.items),
@@ -319,6 +347,7 @@ async def single_custom_generate(
             task_id=result["task_id"],
             total_count=1,
             mode="batch",
+            access_token=result.get("access_token"),
         )
     except Exception as e:
         return BatchGenerateResponse(
@@ -364,6 +393,7 @@ async def single_edit_generate(
             task_id=result["task_id"],
             total_count=1,
             mode="batch",
+            access_token=result.get("access_token"),
         )
     except Exception as e:
         return BatchGenerateResponse(
@@ -420,6 +450,7 @@ async def batch_generate(
             task_id=result["task_id"],
             total_count=result["total_count"],
             mode="batch",
+            access_token=result.get("access_token"),
         )
 
     except Exception as e:
@@ -434,12 +465,20 @@ async def batch_generate(
     response_model=BatchStatusResponse,
     summary="查询批量任务进度",
 )
-async def get_batch_status(task_id: str):
+async def get_batch_status(
+    task_id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    task_token: Optional[str] = Header(
+        default=None,
+        alias="X-Task-Access-Token",
+    ),
+):
     """
     查询批量生成任务的详细进度
 
     返回整体状态、各子任务的生成状态和结果图片 URL
     """
+    _require_task_access(task_id, current_user, task_token)
     status = batch_service.get_batch_status(task_id)
     if not status:
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")
@@ -450,14 +489,22 @@ async def get_batch_status(task_id: str):
     "/{task_id}/stream",
     summary="SSE 实时推送生成进度",
 )
-async def stream_batch_status(task_id: str):
+async def stream_batch_status(
+    task_id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    task_token: Optional[str] = Header(
+        default=None,
+        alias="X-Task-Access-Token",
+    ),
+):
     """
     Server-Sent Events 实时推送批量任务进度
 
-    前端通过 EventSource 监听，每 2 秒发送一次当前状态
+    前端通过带鉴权请求头的 fetch 流读取，每 2 秒发送一次当前状态
     任务完成后自动关闭连接
     """
     import json
+    _require_task_access(task_id, current_user, task_token)
 
     async def event_generator():
         max_polls = 300  # 最多轮询 10 分钟
@@ -493,12 +540,20 @@ async def stream_batch_status(task_id: str):
     "/{task_id}/download",
     summary="ZIP 打包下载所有成功图片",
 )
-async def download_batch(task_id: str):
+async def download_batch(
+    task_id: str,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    task_token: Optional[str] = Header(
+        default=None,
+        alias="X-Task-Access-Token",
+    ),
+):
     """
     将批量生成的所有成功图片打包为 ZIP 下载
 
     文件命名格式: 序号_标题.png
     """
+    _require_task_access(task_id, current_user, task_token)
     zip_buffer = batch_service.build_download_zip(task_id)
     if not zip_buffer:
         raise HTTPException(
@@ -519,12 +574,21 @@ async def download_batch(task_id: str):
     "/{task_id}/retry",
     summary="重试所有失败的子任务",
 )
-async def retry_failed(task_id: str, background_tasks: BackgroundTasks):
+async def retry_failed(
+    task_id: str,
+    background_tasks: BackgroundTasks,
+    current_user: Optional[User] = Depends(get_current_user_optional),
+    task_token: Optional[str] = Header(
+        default=None,
+        alias="X-Task-Access-Token",
+    ),
+):
     """
     重新生成批量任务中所有状态为 failed 的子任务
 
     重试时保留原有参数和系列风格锚定配置
     """
+    _require_task_access(task_id, current_user, task_token)
     status = batch_service.get_batch_status(task_id)
     if status is None:
         raise HTTPException(status_code=404, detail=f"任务 {task_id} 不存在")

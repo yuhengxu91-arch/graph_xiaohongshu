@@ -21,6 +21,16 @@
 
     <!-- 成功态内容 -->
     <div v-if="result.success" class="p-8 space-y-10">
+      <div
+        v-if="fallbackNotice(result)"
+        class="px-5 py-4 bg-amber-50 border border-amber-200 rounded-2xl text-sm text-amber-900"
+      >
+        <div class="font-black">当前使用降级方案</div>
+        <div class="mt-1 text-xs text-amber-700">
+          {{ fallbackNotice(result) }}
+          <span v-if="result.actual_model_name">实际模型：{{ result.actual_model_name }}</span>
+        </div>
+      </div>
       <!-- 单图展示 -->
       <div v-if="result.mode !== 'batch' && result.mode !== 'export_all'" class="relative group">
         <div class="absolute -inset-4 bg-gradient-to-r from-blue-500/10 to-indigo-500/10 rounded-[3rem] blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-1000"></div>
@@ -40,6 +50,7 @@
           <div v-for="(imgInfo, idx) in result.images" :key="idx" class="group bg-slate-50 border border-slate-200 rounded-3xl p-4 hover:bg-white hover:shadow-xl hover:-translate-y-1 transition-all">
             <div class="aspect-[3/4] bg-slate-200 rounded-2xl overflow-hidden mb-4 relative shadow-inner">
               <img :src="getImageUrl(imgInfo.url)" class="w-full h-full object-cover group-hover:scale-110 transition-transform duration-700" alt="适配图片" />
+              <span v-if="imgInfo.degraded" class="absolute top-2 left-2 px-2 py-1 bg-amber-500 text-white rounded-lg text-[10px] font-black">降级生成</span>
               <div class="absolute inset-0 bg-slate-900/0 group-hover:bg-slate-900/20 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
                 <a :href="getImageUrl(imgInfo.url)" download class="p-3 bg-white rounded-xl shadow-xl hover:scale-110 transition-transform">📥</a>
               </div>
@@ -85,6 +96,13 @@
             </div>
           </div>
           <div v-else class="text-sm text-slate-500">任务已提交，正在加载进度...</div>
+          <div
+            v-if="singleBatchDisplayItem?.degraded"
+            class="px-4 py-3 bg-amber-50 border border-amber-200 rounded-xl text-xs text-amber-800"
+          >
+            {{ fallbackNotice(singleBatchDisplayItem) }}
+            <span v-if="singleBatchDisplayItem.actual_model_name">实际模型：{{ singleBatchDisplayItem.actual_model_name }}</span>
+          </div>
         </div>
 
         <div class="relative group">
@@ -158,6 +176,9 @@
               <span>成功 <span class="text-emerald-600">{{ batchStatus.success_count }}</span> / 失败 <span class="text-red-500">{{ batchStatus.failed_count }}</span></span>
               <span>{{ batchStatus.success_count + batchStatus.failed_count }} / {{ batchStatus.total_count }}</span>
             </div>
+            <div v-if="batchStatus.degraded_count" class="text-xs font-bold text-amber-700">
+              其中 {{ batchStatus.degraded_count }} 张使用降级方案完成，如有问题请咨询管理员查看原因。
+            </div>
           </div>
           <div v-else class="text-sm text-slate-500">任务已提交，正在加载进度...</div>
         </div>
@@ -166,6 +187,7 @@
           <div v-for="item in batchStatus.items" :key="item.order_index" class="bg-white border border-slate-100 rounded-2xl overflow-hidden shadow-sm">
             <div v-if="item.status === 'success' && item.image_url" class="aspect-[3/4] relative group">
               <img :src="getImageUrl(item.image_url)" class="w-full h-full object-cover" />
+              <span v-if="item.degraded" class="absolute top-2 left-2 px-2 py-1 bg-amber-500 text-white rounded-lg text-[10px] font-black">降级生成</span>
               <div class="absolute inset-0 bg-black/0 group-hover:bg-black/30 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
                 <a :href="getImageUrl(item.image_url)" download class="p-2 bg-white rounded-xl shadow-lg text-sm">📥</a>
               </div>
@@ -245,6 +267,7 @@
 <script setup>
 import { ref, computed, watch, onUnmounted } from 'vue'
 import { getBatchStatus, retryBatchTask } from '../../api.js'
+import { fallbackNotice } from '../../utils/imageFallback.js'
 import SalesSyncModal from '../common/SalesSyncModal.vue'
 
 const props = defineProps({
@@ -337,7 +360,7 @@ async function pollBatch(taskId) {
   }
   batchPolling.value = true
   try {
-    const data = await getBatchStatus(taskId)
+    const data = await getBatchStatus(taskId, props.result?.access_token)
     batchStatus.value = data
 
     const done = ['completed', 'partial_failed', 'failed'].includes(data.status)
@@ -356,7 +379,10 @@ async function retryFailedBatchItems() {
   if (!props.result?.task_id || batchRetrying.value) return
   batchRetrying.value = true
   try {
-    await retryBatchTask(props.result.task_id)
+    await retryBatchTask(
+      props.result.task_id,
+      props.result?.access_token,
+    )
     await pollBatch(props.result.task_id)
   } catch (e) {
     console.error('重试失败项失败:', e)

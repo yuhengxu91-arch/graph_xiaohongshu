@@ -5,7 +5,10 @@
 from __future__ import annotations
 
 import asyncio
+import hashlib
+import hmac
 import io
+import secrets
 import uuid
 import zipfile
 from datetime import datetime
@@ -49,9 +52,11 @@ class BatchService:
         for idx, item in enumerate(items):
             task_items.append(self._build_task_item(item, idx))
 
+        access_token, access_token_hash = self._new_access_credentials(user_id)
         task = {
             "id": task_id,
             "user_id": str(user_id) if user_id else None,
+            "access_token_hash": access_token_hash,
             "status": "pending",
             "total_count": len(task_items),
             "success_count": 0,
@@ -74,6 +79,7 @@ class BatchService:
             "task_id": task_id,
             "total_count": len(task_items),
             "mode": "batch",
+            "access_token": access_token,
         }
 
     async def append_batch_items(
@@ -151,9 +157,11 @@ class BatchService:
             "started_at": None,
             "completed_at": None,
         }
+        access_token, access_token_hash = self._new_access_credentials(user_id)
         task = {
             "id": task_id,
             "user_id": str(user_id) if user_id else None,
+            "access_token_hash": access_token_hash,
             "status": "pending",
             "total_count": 1,
             "success_count": 0,
@@ -177,7 +185,30 @@ class BatchService:
             "task_id": task_id,
             "total_count": 1,
             "mode": "batch",
+            "access_token": access_token,
         }
+
+    def can_access_task(
+        self,
+        task_id: str,
+        *,
+        user_id: Optional[UUID] = None,
+        is_admin: bool = False,
+        access_token: Optional[str] = None,
+    ) -> bool:
+        task = _tasks.get(task_id)
+        if not task:
+            return False
+        if is_admin:
+            return True
+        owner_id = task.get("user_id")
+        if owner_id:
+            return bool(user_id and owner_id == str(user_id))
+        expected_hash = task.get("access_token_hash")
+        if not expected_hash or not access_token:
+            return False
+        actual_hash = self._hash_access_token(access_token)
+        return hmac.compare_digest(expected_hash, actual_hash)
 
     async def run_single_generation_task(self, task_id: str) -> None:
         """执行单张异步生成任务。"""
@@ -720,6 +751,7 @@ class BatchService:
             db_task = BatchTask(
                 id=UUID(task["id"]),
                 user_id=user_id,
+                access_token_hash=task.get("access_token_hash"),
                 status=task["status"],
                 total_count=task["total_count"],
                 success_count=task["success_count"],
@@ -913,6 +945,20 @@ class BatchService:
         if not value:
             return None
         return datetime.fromisoformat(value)
+
+    @staticmethod
+    def _hash_access_token(access_token: str) -> str:
+        return hashlib.sha256(access_token.encode("utf-8")).hexdigest()
+
+    @classmethod
+    def _new_access_credentials(
+        cls,
+        user_id: Optional[UUID],
+    ) -> tuple[Optional[str], Optional[str]]:
+        if user_id:
+            return None, None
+        access_token = secrets.token_urlsafe(32)
+        return access_token, cls._hash_access_token(access_token)
 
 
 batch_service = BatchService()

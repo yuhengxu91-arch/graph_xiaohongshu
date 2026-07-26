@@ -229,6 +229,9 @@
               <p class="text-xs text-slate-400 mt-1">
                 成功 {{ batchStatus?.success_count || 0 }} 张，失败 {{ batchStatus?.failed_count || 0 }} 张
               </p>
+              <p v-if="batchStatus?.degraded_count" class="text-xs text-amber-700 mt-1">
+                其中 {{ batchStatus.degraded_count }} 张使用降级方案，如有问题请咨询管理员查看原因。
+              </p>
             </div>
             <button
               class="px-4 py-2 bg-slate-100 hover:bg-slate-200 text-slate-600 text-xs font-black rounded-xl transition-colors"
@@ -246,6 +249,9 @@
             >
               <div v-if="item.status === 'success' && item.image_url" class="aspect-[3/4] bg-slate-900 relative overflow-hidden">
                 <img :src="getImageUrl(item.image_url)" class="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" alt="批量生成海报" />
+                <span v-if="item.degraded" class="absolute top-3 left-3 px-2 py-1 bg-amber-500 text-white rounded-lg text-[10px] font-black">
+                  降级生成
+                </span>
                 <div class="absolute inset-0 bg-black/0 group-hover:bg-black/25 transition-all flex items-center justify-center opacity-0 group-hover:opacity-100">
                   <a :href="getImageUrl(item.image_url)" download class="px-3 py-2 bg-white rounded-xl text-xs font-black text-slate-700 shadow-lg">下载</a>
                 </div>
@@ -304,6 +310,7 @@ const form = ref({
 })
 const consumedPrefillKey = ref(null)
 const batchTaskId = ref(null)
+const batchTaskToken = ref(null)
 const batchStatus = ref(null)
 const batchSubmitting = ref(false)
 let batchPollTimer = null
@@ -448,11 +455,16 @@ async function handleBatchGenerate() {
   try {
     let result
     if (batchTaskId.value) {
-      result = await appendTemplateBatchItems(batchTaskId.value, payload)
+      result = await appendTemplateBatchItems(
+        batchTaskId.value,
+        payload,
+        batchTaskToken.value,
+      )
     } else {
       result = await createTemplateBatchTask(payload)
       if (result?.task_id) {
         batchTaskId.value = result.task_id
+        batchTaskToken.value = result.access_token || null
       }
     }
 
@@ -504,7 +516,10 @@ function buildTemplateBatchPayload(items) {
 async function refreshTemplateBatchStatus() {
   if (!batchTaskId.value) return null
   try {
-    const status = await getBatchStatus(batchTaskId.value)
+    const status = await getBatchStatus(
+      batchTaskId.value,
+      batchTaskToken.value,
+    )
     batchStatus.value = status
     return status
   } catch (e) {
@@ -540,6 +555,7 @@ function clearBatchPolling() {
 function clearBatchResults() {
   clearBatchPolling()
   batchTaskId.value = null
+  batchTaskToken.value = null
   batchStatus.value = null
   batchSubmitting.value = false
 }

@@ -3,7 +3,7 @@
 """
 from __future__ import annotations
 
-from typing import Optional
+from typing import Any, Dict, Optional
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -28,6 +28,9 @@ class ImageModelRequest(BaseModel):
     is_active: bool = True
     is_default: bool = False
     sort_order: int = 0
+    fallback_enabled: bool = False
+    fallback_priority: Optional[int] = Field(default=None, ge=1)
+    capabilities: Dict[str, Any] = Field(default_factory=dict)
 
 
 class ImageModelUpdateRequest(BaseModel):
@@ -40,6 +43,9 @@ class ImageModelUpdateRequest(BaseModel):
     is_active: Optional[bool] = None
     is_default: Optional[bool] = None
     sort_order: Optional[int] = None
+    fallback_enabled: Optional[bool] = None
+    fallback_priority: Optional[int] = Field(default=None, ge=1)
+    capabilities: Optional[Dict[str, Any]] = None
 
 
 async def _ensure_admin(db: AsyncSession, current_user: User) -> None:

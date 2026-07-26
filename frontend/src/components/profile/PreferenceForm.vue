@@ -91,6 +91,9 @@
                   <span class="model-name">{{ model.name }}</span>
                   <span class="type-badge">{{ providerLabel(model.provider_type) }}</span>
                   <span v-if="model.is_default" class="default-badge">默认</span>
+                  <span v-if="model.fallback_enabled" class="fallback-badge">
+                    备用 {{ model.fallback_priority }}
+                  </span>
                   <span v-if="!model.is_active" class="off-badge">停用</span>
                 </div>
                 <div class="model-meta">{{ model.model_name }} · {{ model.base_url }}</div>
@@ -190,6 +193,39 @@
             </label>
           </div>
 
+          <div class="fallback-settings">
+            <div class="fallback-heading">
+              <label class="check-inline">
+                <input v-model="modelForm.fallback_enabled" type="checkbox" />
+                参与自动降级
+              </label>
+              <label v-if="modelForm.fallback_enabled" class="flag-inline">
+                优先级
+                <input v-model.number="modelForm.fallback_priority" type="number" min="1" class="small-input" />
+              </label>
+            </div>
+            <template v-if="modelForm.fallback_enabled">
+              <p class="fallback-hint">数字越小越先尝试，仅在主模型临时故障时启用。</p>
+              <div class="capability-grid">
+                <label v-for="item in capabilityOptions" :key="item.value" class="check-inline">
+                  <input v-model="modelForm.capabilities[item.value]" type="checkbox" />
+                  {{ item.label }}
+                </label>
+              </div>
+              <div class="ratio-settings">
+                <span>支持比例</span>
+                <label v-for="ratio in aspectRatioOptions" :key="ratio" class="check-inline">
+                  <input
+                    v-model="modelForm.capabilities.aspect_ratios"
+                    type="checkbox"
+                    :value="ratio"
+                  />
+                  {{ ratio }}
+                </label>
+              </div>
+            </template>
+          </div>
+
           <p v-if="modelMsg" :class="['save-msg', 'dialog-msg', modelMsgError ? 'error' : '']">{{ modelMsg }}</p>
 
           <div class="form-actions">
@@ -247,6 +283,14 @@ const providerTypes = ref([
   { value: 'gemini', label: 'Gemini' },
   { value: 'doubao', label: '豆包 Seedream' },
 ])
+const capabilityOptions = [
+  { value: 'text_to_image', label: '文生图' },
+  { value: 'single_reference', label: '单参考图' },
+  { value: 'multiple_references', label: '多参考图' },
+  { value: 'image_edit', label: '以图改图' },
+  { value: 'mask_edit', label: '遮罩编辑' },
+]
+const aspectRatioOptions = ['3:4', '2.35:1', '9:16', '1:1', '16:9']
 
 const engineOptions = computed(() => {
   const publicModels = imageModels.value
@@ -272,6 +316,16 @@ const blankModelForm = () => ({
   is_active: true,
   is_default: false,
   sort_order: 0,
+  fallback_enabled: false,
+  fallback_priority: 1,
+  capabilities: {
+    text_to_image: true,
+    single_reference: false,
+    multiple_references: false,
+    image_edit: false,
+    mask_edit: false,
+    aspect_ratios: [...aspectRatioOptions],
+  },
 })
 
 const modelForm = ref(blankModelForm())
@@ -367,6 +421,15 @@ function editModel(model) {
     is_active: Boolean(model.is_active),
     is_default: Boolean(model.is_default),
     sort_order: Number(model.sort_order || 0),
+    fallback_enabled: Boolean(model.fallback_enabled),
+    fallback_priority: Number(model.fallback_priority || 1),
+    capabilities: {
+      ...blankModelForm().capabilities,
+      ...(model.capabilities || {}),
+      aspect_ratios: [
+        ...(model.capabilities?.aspect_ratios || aspectRatioOptions),
+      ],
+    },
   }
   modelMsg.value = ''
 }
@@ -408,6 +471,15 @@ function buildModelPayload() {
     api_key: modelForm.value.api_key.trim(),
     description: modelForm.value.description.trim(),
     sort_order: Number(modelForm.value.sort_order || 0),
+    fallback_priority: modelForm.value.fallback_enabled
+      ? Number(modelForm.value.fallback_priority || 0)
+      : null,
+    capabilities: {
+      ...modelForm.value.capabilities,
+      aspect_ratios: [
+        ...(modelForm.value.capabilities.aspect_ratios || []),
+      ],
+    },
   }
   if (editingModelId.value && !payload.api_key) {
     delete payload.api_key
@@ -419,6 +491,11 @@ async function submitModel() {
   const payload = buildModelPayload()
   if (!payload.name || !payload.base_url || !payload.model_name || (!editingModelId.value && !payload.api_key)) {
     modelMsg.value = '请填写名称、Base URL、Model 和 API Key'
+    modelMsgError.value = true
+    return
+  }
+  if (payload.fallback_enabled && payload.fallback_priority < 1) {
+    modelMsg.value = '启用自动降级时，优先级必须大于 0'
     modelMsgError.value = true
     return
   }
@@ -654,6 +731,7 @@ label {
 .mini-badge,
 .default-badge,
 .type-badge,
+.fallback-badge,
 .off-badge {
   display: inline-flex;
   align-items: center;
@@ -673,6 +751,11 @@ label {
 .type-badge {
   color: #3363a6;
   background: #eef4ff;
+}
+
+.fallback-badge {
+  color: #6d28d9;
+  background: #f3e8ff;
 }
 
 .off-badge {
@@ -818,6 +901,40 @@ label {
   flex-wrap: wrap;
   align-items: center;
   gap: 14px;
+}
+
+.fallback-settings {
+  padding-top: 14px;
+  border-top: 1px solid #ebeef5;
+}
+
+.fallback-heading,
+.capability-grid,
+.ratio-settings {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+
+.fallback-heading {
+  justify-content: space-between;
+}
+
+.fallback-hint {
+  margin: 8px 0 12px;
+  color: #909399;
+  font-size: 12px;
+}
+
+.capability-grid {
+  margin-bottom: 12px;
+}
+
+.ratio-settings > span {
+  color: #606266;
+  font-size: 13px;
+  font-weight: 600;
 }
 
 .flag-inline,

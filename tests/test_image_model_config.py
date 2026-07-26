@@ -59,6 +59,51 @@ class ImageModelFallbackConfigTests(unittest.TestCase):
         self.assertNotEqual(serialized["api_key"], config.api_key)
         self.assertNotIn(config.api_key, repr(serialized))
 
+    def test_normalize_capabilities_rejects_unknown_fields(self):
+        with self.assertRaisesRegex(ValueError, "不支持的模型能力"):
+            self.service._normalize_capabilities(
+                {"text_to_image": True, "unknown_mode": True}
+            )
+
+    def test_normalize_capabilities_rejects_invalid_aspect_ratio(self):
+        with self.assertRaisesRegex(ValueError, "不支持的图片比例"):
+            self.service._normalize_capabilities(
+                {"text_to_image": True, "aspect_ratios": ["4:5"]}
+            )
+
+    def test_normalize_capabilities_rejects_string_booleans(self):
+        with self.assertRaisesRegex(ValueError, "必须为布尔值"):
+            self.service._normalize_capabilities(
+                {"text_to_image": "false"}
+            )
+
+    def test_normalize_capabilities_rejects_non_string_ratios(self):
+        with self.assertRaisesRegex(ValueError, "图片比例必须为字符串"):
+            self.service._normalize_capabilities(
+                {"aspect_ratios": [{"width": 3, "height": 4}]}
+            )
+
+    def test_mask_edit_requires_image_edit(self):
+        with self.assertRaisesRegex(ValueError, "遮罩编辑能力依赖"):
+            self.service._normalize_capabilities(
+                {"mask_edit": True, "image_edit": False}
+            )
+
+    def test_normalize_capabilities_fills_conservative_defaults(self):
+        normalized = self.service._normalize_capabilities(
+            {
+                "text_to_image": True,
+                "aspect_ratios": ["3:4", "3:4", "1:1"],
+            }
+        )
+
+        self.assertTrue(normalized["text_to_image"])
+        self.assertFalse(normalized["single_reference"])
+        self.assertFalse(normalized["multiple_references"])
+        self.assertFalse(normalized["image_edit"])
+        self.assertFalse(normalized["mask_edit"])
+        self.assertEqual(normalized["aspect_ratios"], ["3:4", "1:1"])
+
 
 class ImageModelConfigDispatchTests(unittest.IsolatedAsyncioTestCase):
     async def test_dynamic_openai_image_config_overrides_env_provider_settings(self):

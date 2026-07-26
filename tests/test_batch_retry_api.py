@@ -11,6 +11,9 @@ class BatchRetryApiTests(unittest.IsolatedAsyncioTestCase):
         original_service = batch_api.batch_service
 
         class FakeBatchService:
+            def can_access_task(self, *args, **kwargs):
+                return True
+
             def get_batch_status(self, task_id):
                 return {
                     "task_id": task_id,
@@ -24,7 +27,11 @@ class BatchRetryApiTests(unittest.IsolatedAsyncioTestCase):
         background_tasks = BackgroundTasks()
         batch_api.batch_service = fake_service
         try:
-            result = await batch_api.retry_failed("task-1", background_tasks)
+            result = await batch_api.retry_failed(
+                "task-1",
+                background_tasks,
+                current_user=None,
+            )
         finally:
             batch_api.batch_service = original_service
 
@@ -38,13 +45,20 @@ class BatchRetryApiTests(unittest.IsolatedAsyncioTestCase):
         original_service = batch_api.batch_service
 
         class FakeBatchService:
+            def can_access_task(self, *args, **kwargs):
+                return False
+
             def get_batch_status(self, task_id):
                 return None
 
         batch_api.batch_service = FakeBatchService()
         try:
             with self.assertRaises(HTTPException) as exc:
-                await batch_api.retry_failed("missing-task", BackgroundTasks())
+                await batch_api.retry_failed(
+                    "missing-task",
+                    BackgroundTasks(),
+                    current_user=None,
+                )
         finally:
             batch_api.batch_service = original_service
 

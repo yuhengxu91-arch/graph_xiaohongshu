@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { batchTaskHeaders } from './utils/batchTaskAccess'
 
 // 生产环境从 .env.production 读取 VITE_API_BASE_URL
 // 开发环境走 Vite 代理（baseURL 为空时走相对路径）
@@ -452,8 +453,10 @@ export async function createTemplateBatchTask(data) {
  * @param {string} taskId - 任务 ID
  * @param {Object} data - { template_id, items, style_tag?, color_option?, aspect_ratio? }
  */
-export async function appendTemplateBatchItems(taskId, data) {
-  const res = await api.post(`/poster/batch/${taskId}/template-items`, data)
+export async function appendTemplateBatchItems(taskId, data, taskToken = null) {
+  const res = await api.post(`/poster/batch/${taskId}/template-items`, data, {
+    headers: batchTaskHeaders({ accessToken: taskToken }),
+  })
   return res.data
 }
 
@@ -461,17 +464,35 @@ export async function appendTemplateBatchItems(taskId, data) {
  * 查询批量任务进度
  * @param {string} taskId - 任务 ID
  */
-export async function getBatchStatus(taskId) {
-  const res = await api.get(`/poster/batch/${taskId}/status`)
+export async function getBatchStatus(taskId, taskToken = null) {
+  const res = await api.get(`/poster/batch/${taskId}/status`, {
+    headers: batchTaskHeaders({ accessToken: taskToken }),
+  })
   return res.data
+}
+
+/**
+ * 打开批量任务 SSE 流。匿名任务令牌放在请求头中，不能使用原生 EventSource。
+ */
+export function streamBatchStatus(taskId, taskToken = null, signal = undefined) {
+  const token = getToken()
+  return fetch(`${API_BASE}/api/v1/poster/batch/${taskId}/stream`, {
+    headers: {
+      ...(token ? { Authorization: `Bearer ${token}` } : {}),
+      ...batchTaskHeaders({ accessToken: taskToken }),
+    },
+    signal,
+  })
 }
 
 /**
  * 重试批量任务中的失败项
  * @param {string} taskId - 任务 ID
  */
-export async function retryBatchTask(taskId) {
-  const res = await api.post(`/poster/batch/${taskId}/retry`)
+export async function retryBatchTask(taskId, taskToken = null) {
+  const res = await api.post(`/poster/batch/${taskId}/retry`, null, {
+    headers: batchTaskHeaders({ accessToken: taskToken }),
+  })
   return res.data
 }
 
@@ -481,6 +502,14 @@ export async function retryBatchTask(taskId) {
  */
 export function getBatchDownloadUrl(taskId) {
   return `${API_BASE}/api/v1/poster/batch/${taskId}/download`
+}
+
+export async function downloadBatchTask(taskId, taskToken = null) {
+  const res = await api.get(`/poster/batch/${taskId}/download`, {
+    headers: batchTaskHeaders({ accessToken: taskToken }),
+    responseType: 'blob',
+  })
+  return res.data
 }
 
 // ============== 局部重绘 & 尺寸适配 (Phase 4) ==============

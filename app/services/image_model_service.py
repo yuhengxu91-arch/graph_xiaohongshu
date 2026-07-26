@@ -19,6 +19,15 @@ class ImageModelService:
     """公共图片模型配置管理。"""
 
     VALID_PROVIDER_TYPES = {"openai_image", "gemini", "doubao"}
+    VALID_CAPABILITY_KEYS = {
+        "text_to_image",
+        "single_reference",
+        "multiple_references",
+        "image_edit",
+        "mask_edit",
+        "aspect_ratios",
+    }
+    VALID_ASPECT_RATIOS = {"3:4", "2.35:1", "9:16", "1:1", "16:9"}
 
     async def is_admin(self, db: AsyncSession, user: User) -> bool:
         """兼容旧调用，统一委托给通用管理员服务。"""
@@ -81,7 +90,9 @@ class ImageModelService:
             sort_order=int(data.get("sort_order") or 0),
             fallback_enabled=bool(data.get("fallback_enabled", False)),
             fallback_priority=self._optional_int(data.get("fallback_priority")),
-            capabilities=dict(data.get("capabilities") or {}),
+            capabilities=self._normalize_capabilities(
+                data.get("capabilities") or {}
+            ),
         )
         if config.is_default:
             config.is_active = True
@@ -124,7 +135,9 @@ class ImageModelService:
         if "fallback_priority" in data:
             config.fallback_priority = self._optional_int(data["fallback_priority"])
         if "capabilities" in data and data["capabilities"] is not None:
-            config.capabilities = dict(data["capabilities"])
+            config.capabilities = self._normalize_capabilities(
+                data["capabilities"]
+            )
         if config.is_default:
             await self._clear_default(db, except_id=config.id)
 
@@ -296,6 +309,38 @@ class ImageModelService:
             config.fallback_priority is None or config.fallback_priority <= 0
         ):
             raise ValueError("启用备用模型时，降级优先级必须为正整数")
+
+    def _normalize_capabilities(
+        self,
+        capabilities: dict[str, Any],
+    ) -> dict[str, Any]:
+        unknown = set(capabilities) - self.VALID_CAPABILITY_KEYS
+        if unknown:
+            raise ValueError(
+                f"不支持的模型能力: {', '.join(sorted(unknown))}"
+            )
+        normalized = {}
+        for name in self.VALID_CAPABILITY_KEYS:
+            if name == "aspect_ratios":
+                continue
+            value = capabilities.get(name, False)
+            if not isinstance(value, bool):
+                raise ValueError(f"模型能力 {name} 必须为布尔值")
+            normalized[name] = value
+        ratios = capabilities.get("aspect_ratios") or []
+        if not isinstance(ratios, list):
+            raise ValueError("支持比例必须为列表")
+        if any(not isinstance(ratio, str) for ratio in ratios):
+            raise ValueError("图片比例必须为字符串")
+        invalid_ratios = set(ratios) - self.VALID_ASPECT_RATIOS
+        if invalid_ratios:
+            raise ValueError(
+                f"不支持的图片比例: {', '.join(sorted(invalid_ratios))}"
+            )
+        normalized["aspect_ratios"] = list(dict.fromkeys(ratios))
+        if normalized["mask_edit"] and not normalized["image_edit"]:
+            raise ValueError("遮罩编辑能力依赖以图改图能力")
+        return normalized
 
     def _supports_capabilities(
         self,
