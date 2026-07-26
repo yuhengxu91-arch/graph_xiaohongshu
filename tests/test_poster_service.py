@@ -13,7 +13,12 @@ from uuid import uuid4
 import httpx
 
 from app.services.poster_service import PosterService
-from app.services.image_fallback_service import ImageModelRef
+from app.services.image_fallback_service import (
+    GenerationContext,
+    GenerationOutcome,
+    ImageFallbackService,
+    ImageModelRef,
+)
 from app.services.image_generation_errors import ImageGenerationError
 
 poster_service_module = importlib.import_module("app.services.poster_service")
@@ -389,6 +394,58 @@ class PosterServiceStructuredErrorTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(poster_service_module.httpx, "AsyncClient", return_value=client):
             with self.assertRaises(asyncio.CancelledError):
                 await service._call_openai_image_api("prompt", self.openai_config())
+
+    async def test_poster_fallback_entry_passes_generation_inputs(self):
+        service = PosterService()
+        primary = ImageModelRef(
+            source="builtin",
+            display_name="豆包 Seedream",
+            provider="doubao",
+        )
+        coordinator = SimpleNamespace(
+            generate=AsyncMock(
+                return_value=GenerationOutcome(
+                    image_base64=VALID_IMAGE_B64,
+                    degraded=False,
+                    requested_model_name="豆包 Seedream",
+                    actual_model_name="豆包 Seedream",
+                    fallback_attempts=0,
+                )
+            )
+        )
+
+        outcome = await service.generate_image_with_fallback(
+            prompt="prompt",
+            primary_ref=primary,
+            context=GenerationContext(chain_id="chain"),
+            mode="custom",
+            reference_images_base64=[VALID_IMAGE_B64, VALID_IMAGE_B64],
+            aspect_ratio="3:4",
+            fallback_service=coordinator,
+        )
+
+        self.assertEqual(outcome.image_base64, VALID_IMAGE_B64)
+        kwargs = coordinator.generate.await_args.kwargs
+        self.assertEqual(
+            kwargs["required_capabilities"],
+            {"multiple_references": True, "aspect_ratio": "3:4"},
+        )
+        with patch.object(
+            service,
+            "_call_ai_image_api",
+            AsyncMock(return_value=VALID_IMAGE_B64),
+        ) as adapter:
+            await kwargs["invoke"](
+                {
+                    "provider_override": "doubao",
+                    "image_model_config": None,
+                }
+            )
+        self.assertEqual(adapter.await_args.kwargs["provider_override"], "doubao")
+        self.assertEqual(
+            adapter.await_args.kwargs["input_images_base64"],
+            [VALID_IMAGE_B64, VALID_IMAGE_B64],
+        )
 
 
 class PosterServiceProviderTests(unittest.TestCase):

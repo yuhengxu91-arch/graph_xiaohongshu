@@ -304,6 +304,8 @@ class ImageModelService:
     ) -> bool:
         for name, required_value in required.items():
             if name == "aspect_ratio":
+                if "aspect_ratios" not in available:
+                    return False
                 ratios = available.get("aspect_ratios") or []
                 if ratios and required_value not in ratios:
                     return False

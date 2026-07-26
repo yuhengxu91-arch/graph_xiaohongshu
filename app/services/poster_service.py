@@ -21,6 +21,14 @@ from app.services.image_generation_errors import (
     decode_inline_image,
     provider_request_error,
 )
+from app.services.image_fallback_service import (
+    GenerationContext,
+    GenerationOutcome,
+    ImageFallbackService,
+    ImageModelRef,
+    derive_required_capabilities,
+    image_fallback_service,
+)
 
 load_dotenv()
 
@@ -1070,6 +1078,45 @@ class PosterService:
             base += f"\n- 扩展区域的内容参考提示: {outpaint_prompt}"
 
         return base
+
+    async def generate_image_with_fallback(
+        self,
+        *,
+        prompt: str,
+        primary_ref: ImageModelRef,
+        context: GenerationContext,
+        mode: str,
+        reference_images_base64: Optional[List[str]] = None,
+        mask_image_base64: Optional[str] = None,
+        aspect_ratio: Optional[str] = None,
+        fallback_service: Optional[ImageFallbackService] = None,
+    ) -> GenerationOutcome:
+        """通过统一协调器执行主模型及必要的顺序降级。"""
+        input_images = list(reference_images_base64 or [])
+        required = derive_required_capabilities(
+            mode,
+            reference_count=len(input_images),
+            aspect_ratio=aspect_ratio,
+        )
+
+        async def invoke(runtime: Dict[str, Any]) -> str:
+            return await self._call_ai_image_api(
+                prompt,
+                input_image_base64=input_images[0] if input_images else None,
+                input_images_base64=input_images,
+                mask_image_base64=mask_image_base64,
+                provider_override=runtime.get("provider_override"),
+                image_model_config=runtime.get("image_model_config"),
+                aspect_ratio=aspect_ratio,
+            )
+
+        coordinator = fallback_service or image_fallback_service
+        return await coordinator.generate(
+            primary_ref=primary_ref,
+            required_capabilities=required,
+            invoke=invoke,
+            context=context,
+        )
 
     async def _call_ai_image_api(
         self, prompt: str,
