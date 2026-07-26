@@ -72,7 +72,8 @@
 - 用户选择内置引擎时，主引用为 `builtin` 和对应 `provider`。
 - “跟随系统默认”在任务创建时解析为当时实际生效的公共默认模型；没有公共默认时解析为环境变量配置的内置默认引擎。
 - 匿名用户使用同样的系统默认解析规则。
-- 公共模型候选列表在任务创建时只快照模型 ID 和安全名称；实际执行和重试时重新读取数据库，已停用或删除的候选会被跳过。
+- 任务只保存主模型引用，不快照备用候选。
+- 每次开始一条降级链时全量查询当前启用的备用模型，因此管理员在任务创建后新增、停用、删除或调整顺序都会对尚未开始的生成项和后续重试生效。
 
 公共模型 API Key 只允许在执行阶段通过独立数据库会话读取并形成短生命周期运行时配置。以下位置不得出现 API Key、Base URL 或完整第三方错误体：
 
@@ -127,6 +128,28 @@
 3. 最后参考网络异常类型。
 4. 无法可靠分类时设置 `retryable=false`。
 
+逐供应商分类表：
+
+| 适配器 | 优先读取字段 | 允许降级 | 禁止降级 |
+|---|---|---|---|
+| `openai_image` | HTTP JSON 的 `error.code`、`error.type`、`error.message`；HTTP 200 时也检查根级 `error` | `rate_limit_error`、`rate_limit_exceeded`、`too_many_requests`；无业务码且 HTTP 429；HTTP 5xx | `invalid_api_key`、`authentication_error`、`permission_denied`、`insufficient_quota`、`billing_hard_limit_reached`、`account_deactivated`、`content_policy_violation`、`moderation_blocked`、`invalid_request_error`、`unsupported_*` |
+| `gemini` | 根级 `error.code/status/message`、`promptFeedback.blockReason`、候选的 `finishReason/finish_reason` 和 `safetyRatings` | `RATE_LIMIT_EXCEEDED`、`TOO_MANY_REQUESTS`；没有配额标记的 HTTP 429；HTTP 5xx；`finishReason=STOP` 且无审核信号但没有图片 | `UNAUTHENTICATED`、`PERMISSION_DENIED`、`INVALID_ARGUMENT`、`FAILED_PRECONDITION`；`SAFETY`、`PROHIBITED_CONTENT`、`BLOCKLIST`、`SPII`、`IMAGE_SAFETY`；余额/配额标记 |
+| `doubao` | 根级 `error`、`data.error`、单图 `item.error` 中的 `code/type/message` | `RateLimitExceeded`、`TooManyRequests`、`ServiceUnavailable`；没有配额标记的 HTTP 429；HTTP 5xx | `AccessDenied`、`InvalidAccessKey`、`Unauthorized`、`InvalidParameter`、`ModelNotFound`、`InsufficientBalance`、`QuotaExceeded`、`SensitiveContent`、`ContentPolicyViolation` |
+
+错误码比较忽略大小写、下划线和短横线差异。供应商代理返回非标准代码时，消息只用于匹配有限的安全关键词：
+
+- 余额/配额类：`insufficient balance`、`billing`、`quota exhausted`、`daily quota`、`monthly quota`、`余额不足`、`配额耗尽`，禁止降级。
+- 审核类：`content policy`、`safety`、`moderation`、`sensitive content`、`内容审核`、`敏感内容`，禁止降级。
+- 临时限流类：`rate limit`、`too many requests`、`concurrency limit`、`限流`、`并发限制`，允许降级。
+
+当 HTTP 429 没有任何可识别业务码或消息时，按已经确认的产品规则视为临时限流并允许降级；若出现余额或长期配额标记，则业务标记优先并禁止降级。HTTP 200 中出现 `error` 时使用同一张表分类，不能当成普通空图片。
+
+第三方图片 URL 下载分类：
+
+- 连接失败、超时、HTTP 404、408、429、5xx、非图片 MIME 或图片解码失败：允许降级。
+- HTTP 400、401、403 及其他明确 4xx：禁止降级。
+- 下载响应超过图片大小上限：按供应商返回无效结果处理，允许降级。
+
 允许自动降级：
 
 - 网络连接失败。
@@ -180,8 +203,10 @@
 - 仅在当前单进程任务仍存在时支持重试，保持现有系统能力边界。
 - 重试从任务创建时的主模型引用开始。
 - 备用候选按重试时数据库中的启用状态和最新优先级重新解析。
-- 重试接口补充当前用户和数据库依赖；登录任务只允许任务所有者或管理员操作。
-- 匿名任务第一版维持现有随机 UUID 隔离，不新增进程重启恢复保证。
+- 状态、SSE、追加条目、重试和下载接口统一执行任务访问校验。
+- 登录任务只允许任务所有者或管理员读取、监听、修改和下载。
+- 匿名任务创建时生成独立的高熵 `task_access_token`，接口只返回一次；数据库和内存任务只保存令牌哈希。匿名请求必须通过请求头提交令牌，SSE 因 EventSource 限制可通过查询参数提交。仅持有任务 UUID 不构成授权。
+- 登录用户不能仅凭任务 UUID 访问匿名任务，仍需匿名任务令牌；管理员可以访问。
 
 现有部署已经固定为单 worker，第一版明确不承诺服务重启后恢复含参考图的任务。后续如需恢复，必须把运行时图片迁移到带生命周期的对象存储并实现数据库任务领取机制，该工作不属于本次降级功能。
 
@@ -197,7 +222,7 @@
 
 日志不得记录 API Key、Base URL、完整图片 Base64、完整第三方响应体或完整提示词。普通用户界面不展示内部错误详情。
 
-状态、重试和下载接口至少对登录任务执行所有者/管理员校验。本次修改涉及的接口必须增加越权测试。
+状态、SSE、追加条目、重试和下载接口都执行上述统一访问校验。本次修改涉及的接口必须增加越权测试。
 
 ## 数据库迁移与兼容
 
@@ -235,7 +260,8 @@
 - 全部失败后保留重试能力。
 - 重试重新读取最新备用顺序，但仍从原主模型引用开始。
 - 历史任务状态兼容缺失字段。
-- 登录任务状态、重试和下载接口拒绝越权访问。
+- 登录任务的状态、SSE、追加、重试和下载接口拒绝越权访问。
+- 匿名任务必须使用正确访问令牌，任务 UUID 单独不可访问；登录用户也不能绕过令牌访问匿名任务。
 
 前端：
 
