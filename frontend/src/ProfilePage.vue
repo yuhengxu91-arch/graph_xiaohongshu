@@ -39,6 +39,9 @@
           <PreferenceForm :prefs="preferences" @update-prefs="handleUpdatePrefs" />
           <PasswordForm @change-password="handleChangePassword" />
         </div>
+
+        <!-- 模型通道状态 (管理员可见) -->
+        <ModelChannelPanel :canManage="canManageModels" />
         
         <!-- 底部退出操作 -->
         <div class="pt-10 flex justify-center border-t border-slate-200">
@@ -67,7 +70,8 @@ import { ref, onMounted } from 'vue'
 // API
 import { 
   getProfile, updateProfile, uploadAvatar, changePassword,
-  getProfileStats, getPreferences, updatePreferences
+  getProfileStats, getPreferences, updatePreferences,
+  getImageModels
 } from './api'
 
 // 组件
@@ -76,6 +80,7 @@ import StatsPanel from './components/profile/StatsPanel.vue'
 import QuickLinks from './components/profile/QuickLinks.vue'
 import PreferenceForm from './components/profile/PreferenceForm.vue'
 import PasswordForm from './components/profile/PasswordForm.vue'
+import ModelChannelPanel from './components/profile/ModelChannelPanel.vue'
 
 const emit = defineEmits(['navigate', 'logout', 'profile-updated'])
 
@@ -85,6 +90,7 @@ const statsLoading = ref(true)
 const profile = ref({})
 const stats = ref({})
 const preferences = ref({})
+const canManageModels = ref(false)
 
 onMounted(async () => {
   await loadBaseProfile()
@@ -103,12 +109,14 @@ async function loadBaseProfile() {
 
 async function loadStatsAndPrefs() {
   try {
-    const [st, pr] = await Promise.all([
+    const [st, pr, imgModels] = await Promise.all([
       getProfileStats(),
-      getPreferences()
+      getPreferences(),
+      getImageModels(false).catch(() => ({ can_manage: false }))
     ])
     stats.value = st
     preferences.value = pr
+    canManageModels.value = Boolean(imgModels.can_manage)
   } catch (e) {
     console.error('Failed to load stats/prefs', e)
   } finally {

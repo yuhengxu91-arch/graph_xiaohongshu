@@ -1883,6 +1883,45 @@ class PosterService:
             return self.project_root / str(path).lstrip("/")
         return self.project_root / path
 
+    async def test_channel(
+        self,
+        *,
+        provider_override: Optional[str] = None,
+        image_model_config: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        """对指定通道发送极简文生图请求，验证通道连通性。"""
+        import time as _time
+
+        test_prompt = "A simple red circle on a white background"
+        started = _time.monotonic()
+        try:
+            await self._call_ai_image_api(
+                test_prompt,
+                provider_override=provider_override,
+                image_model_config=image_model_config,
+                aspect_ratio="1:1",
+            )
+            elapsed = (_time.monotonic() - started) * 1000
+            return {
+                "success": True,
+                "latency_ms": round(elapsed, 1),
+                "error": None,
+            }
+        except ImageGenerationError as exc:
+            elapsed = (_time.monotonic() - started) * 1000
+            return {
+                "success": False,
+                "latency_ms": round(elapsed, 1),
+                "error": exc.safe_message or str(exc),
+            }
+        except Exception as exc:
+            elapsed = (_time.monotonic() - started) * 1000
+            return {
+                "success": False,
+                "latency_ms": round(elapsed, 1),
+                "error": str(exc) or "未知错误",
+            }
+
 
 # ======================== 单例实例 ========================
 poster_service = PosterService()

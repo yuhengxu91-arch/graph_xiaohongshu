@@ -852,6 +852,20 @@ export async function setDefaultImageModel(id) {
   return res.data
 }
 
+// ============== 模型通道健康检测 API ==============
+
+export async function getModelChannels() {
+  const res = await api.get('/image-models/channels')
+  return res.data
+}
+
+export async function testModelChannel(channelId) {
+  const res = await api.post(`/image-models/test/${channelId}`, null, {
+    timeout: 120000,  // 测试生图可能耗时较长
+  })
+  return res.data
+}
+
 // ============== 多平台适配 API (Platform Adapter) ==============
 
 /**
