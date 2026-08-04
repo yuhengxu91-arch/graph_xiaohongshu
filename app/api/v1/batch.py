@@ -105,6 +105,7 @@ class TemplateBatchGenerateRequest(BaseModel):
     style_tag: Optional[str] = None
     color_option: Optional[str] = None
     aspect_ratio: Optional[str] = None
+    model_override: Optional[str] = Field(None, description="临时模型覆盖，如 builtin:gemini 或 config:{uuid}")
 
 
 class BatchAppendResponse(BaseModel):
@@ -145,6 +146,7 @@ class SingleCustomRequest(BaseModel):
     aspect_ratio: str = "3:4"
     color_tone: Optional[str] = None
     reference_images: Optional[List[SingleReferenceImage]] = None
+    model_override: Optional[str] = Field(None, description="临时模型覆盖，如 builtin:gemini 或 config:{uuid}")
 
 
 class SingleEditRequest(BaseModel):
@@ -152,41 +154,70 @@ class SingleEditRequest(BaseModel):
     image_base64: str = Field(..., min_length=1, description="原始图片 base64")
     edit_prompt: str = Field(..., min_length=1, max_length=IMAGE_PROMPT_MAX_LENGTH)
     aspect_ratio: str = "3:4"
+    model_override: Optional[str] = Field(None, description="临时模型覆盖，如 builtin:gemini 或 config:{uuid}")
 
 
 # ======================== 接口 ========================
 
+async def _resolve_model_override(
+    db: AsyncSession,
+    override: str,
+) -> Optional["ImageModelRef"]:
+    """将前端传入的 model_override 字符串解析为 ImageModelRef。"""
+    if override.startswith("builtin:"):
+        provider = override.replace("builtin:", "")
+        try:
+            return image_model_service.model_ref_for_builtin(provider)
+        except ValueError:
+            return None
+    if override.startswith("config:"):
+        from uuid import UUID as _UUID
+        config_id_str = override.replace("config:", "")
+        try:
+            config_id = _UUID(config_id_str)
+        except ValueError:
+            return None
+        config = await image_model_service.get_config(db, config_id=config_id, active_only=True)
+        if config:
+            return image_model_service.model_ref_for_config(config)
+    return None
+
+
 async def _get_runtime_image_context(
     db: AsyncSession,
     current_user: Optional[User],
+    *,
+    model_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     brand_kit = None
-    image_provider = None
     model_ref = None
+
     if current_user:
         kit = await brand_service.get_brand_kit(db, user_id=current_user.id)
         if kit:
             brand_kit = brand_service.serialize(kit)
+
+    # 优先使用前端传入的临时模型覆盖
+    if model_override:
+        model_ref = await _resolve_model_override(db, model_override)
+    
+    # 如果没有覆盖，回退到用户偏好
+    if not model_ref and current_user:
         image_provider = await profile_service.get_user_image_provider(
-            db,
-            user_id=current_user.id,
+            db, user_id=current_user.id,
         )
         model_ref = await profile_service.get_user_image_model_config(
-            db,
-            user_id=current_user.id,
+            db, user_id=current_user.id,
         )
-
-    if not model_ref and image_provider:
-        model_ref = image_model_service.model_ref_for_builtin(image_provider)
+        if not model_ref and image_provider:
+            model_ref = image_model_service.model_ref_for_builtin(image_provider)
 
     if not model_ref:
         default_model = await image_model_service.get_default_config(db)
         if default_model:
             model_ref = image_model_service.model_ref_for_config(default_model)
         else:
-            model_ref = image_model_service.model_ref_for_builtin(
-                poster_service.provider
-            )
+            model_ref = image_model_service.model_ref_for_builtin(poster_service.provider)
 
     return {
         "brand_kit": brand_kit,
@@ -231,7 +262,7 @@ async def _template_shared_config(
         "color_option": req.color_option,
         "aspect_ratio": req.aspect_ratio or (tpl.config or {}).get("default_aspect_ratio", "3:4"),
         "series_mode": False,
-        **(await _get_runtime_image_context(db, current_user)),
+        **(await _get_runtime_image_context(db, current_user, model_override=req.model_override)),
     }
 
 
@@ -321,7 +352,7 @@ async def single_custom_generate(
     避免长时间同步请求被反向代理/浏览器判定超时。
     """
     try:
-        context = await _get_runtime_image_context(db, current_user)
+        context = await _get_runtime_image_context(db, current_user, model_override=req.model_override)
         shared_config = {
             "aspect_ratio": req.aspect_ratio,
             "color_tone": req.color_tone,
@@ -371,7 +402,7 @@ async def single_edit_generate(
     提交单张以图改图任务，立即返回 task_id，图片在后台生成。
     """
     try:
-        context = await _get_runtime_image_context(db, current_user)
+        context = await _get_runtime_image_context(db, current_user, model_override=req.model_override)
         shared_config = {
             "aspect_ratio": req.aspect_ratio,
             "series_mode": False,

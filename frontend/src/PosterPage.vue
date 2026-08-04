@@ -444,6 +444,7 @@ function handleTemplateGenerate(form) {
     params: form.params,
     color_option: form.colorOption || undefined,
     aspect_ratio: form.aspectRatio || undefined,
+    model_override: form.modelOverride || undefined,
   }
 
   generateWithWrapper('template', payload)
@@ -454,6 +455,7 @@ function handleEditGenerate(form) {
     image_base64: form.imageBase64,
     edit_prompt: form.editPrompt,
     aspect_ratio: form.aspectRatio,
+    model_override: form.modelOverride || undefined,
   })
 }
 

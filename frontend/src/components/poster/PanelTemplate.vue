@@ -69,22 +69,10 @@
           </div>
         </div>
         <div class="flex items-center gap-3">
-          <div
-            v-if="currentImageModel"
-            class="hidden sm:flex items-center gap-2 px-4 py-2 bg-white border border-slate-200 rounded-2xl shadow-sm max-w-[20rem]"
-            :title="`${currentImageModel.label} · ${currentImageModel.provider} · ${currentImageModel.model}`"
-          >
-            <span class="text-base shrink-0">{{ currentImageModel.icon }}</span>
-            <div class="min-w-0 text-left">
-              <div class="text-[10px] font-black text-slate-400 uppercase tracking-widest leading-none">
-                当前模型 · {{ currentImageModel.source }}
-              </div>
-              <div class="mt-1 text-xs font-black text-slate-700 truncate">
-                {{ currentImageModel.label }}
-                <span class="text-slate-400 font-bold">/ {{ currentImageModel.provider }}</span>
-              </div>
-            </div>
-          </div>
+          <ModelSwitcher
+            v-model="selectedModelOverride"
+            :currentImageModel="currentImageModel"
+          />
           <div class="px-4 py-1.5 bg-blue-50 text-blue-600 text-[10px] font-black rounded-full uppercase tracking-widest border border-blue-100">
             Template Config
           </div>
@@ -275,6 +263,7 @@
 <script setup>
 import { ref, computed, onMounted, onUnmounted, watch } from 'vue'
 import RatioSelector from './RatioSelector.vue'
+import ModelSwitcher from './ModelSwitcher.vue'
 import TemplatePreview from '../template/TemplatePreview.vue'
 import {
   appendTemplateBatchItems,
@@ -313,6 +302,7 @@ const batchTaskId = ref(null)
 const batchTaskToken = ref(null)
 const batchStatus = ref(null)
 const batchSubmitting = ref(false)
+const selectedModelOverride = ref(null)
 let batchPollTimer = null
 const terminalBatchStatuses = ['completed', 'partial_failed', 'failed']
 
@@ -437,7 +427,8 @@ function handleGenerate() {
   if (!selectedTemplate.value || !isValid.value || props.generating) return
   emit('generate', {
     template: selectedTemplate.value,
-    ...form.value
+    ...form.value,
+    modelOverride: selectedModelOverride.value || undefined,
   })
 }
 

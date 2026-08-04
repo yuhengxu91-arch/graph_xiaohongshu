@@ -1,7 +1,13 @@
 <template>
   <div class="poster-panel">
     <div class="card">
-      <div class="card-title">上传图片以进行编辑</div>
+      <div class="card-header-row">
+        <div class="card-title">上传图片以进行编辑</div>
+        <ModelSwitcher
+          v-model="selectedModelOverride"
+          :currentImageModel="currentImageModel"
+        />
+      </div>
 
       <!-- 图片上传 -->
       <ImageUploader v-model="form.imageBase64" />
@@ -39,10 +45,12 @@
 import { ref, computed } from 'vue'
 import ImageUploader from './ImageUploader.vue'
 import RatioSelector from './RatioSelector.vue'
+import ModelSwitcher from './ModelSwitcher.vue'
 
 const props = defineProps({
   aspectRatios: { type: Array, default: () => [] },
-  generating: { type: Boolean, default: false }
+  generating: { type: Boolean, default: false },
+  currentImageModel: { type: Object, default: null },
 })
 
 const emit = defineEmits(['generate'])
@@ -53,12 +61,28 @@ const form = ref({
   aspectRatio: '3:4',
 })
 
+const selectedModelOverride = ref(null)
+
 const isValid = computed(() => {
   return form.value.imageBase64 && form.value.editPrompt.trim()
 })
 
 function handleGenerate() {
   if (!isValid.value || props.generating) return
-  emit('generate', { ...form.value })
+  emit('generate', {
+    ...form.value,
+    modelOverride: selectedModelOverride.value || undefined,
+  })
 }
 </script>
+
+<style scoped>
+.card-header-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+}
+</style>
