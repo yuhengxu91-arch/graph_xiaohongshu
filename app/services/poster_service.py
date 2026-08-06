@@ -1341,9 +1341,14 @@ class PosterService:
     ) -> str:
         """调用 OpenAI Images 兼容接口。"""
         api_key = config.get("api_key", "")
-        base_url = (config.get("base_url") or "").rstrip("/")
+        raw_base_url = (config.get("base_url") or "").rstrip("/")
+        if raw_base_url.endswith("/v1"):
+            base_url = raw_base_url[:-3]
+        else:
+            base_url = raw_base_url
         model = config.get("model_name") or config.get("model") or "gpt-image-2"
         size = self._resolve_api_size(aspect_ratio)
+
 
         if not api_key:
             raise ImageGenerationError(
@@ -1489,7 +1494,7 @@ class PosterService:
         if image_base64.startswith("data:"):
             header, _, data = image_base64.partition(",")
             encoded = data
-            media = header.removeprefix("data:").split(";", 1)[0]
+            media = header.removeprefix("data:").split(";", 1)[0].lower()
             if media:
                 mime_type = media
 
@@ -1502,7 +1507,20 @@ class PosterService:
                 retryable=False,
                 internal_code="invalid_input_image",
             ) from exc
-        return (filename, image_bytes, mime_type)
+
+        # 根据真实 mime_type 动态校准 filename 扩展名，避免文件名后缀(.png)与 Content-Type(image/jpeg)冲突导致 400
+        ext = ".png"
+        if mime_type in ("image/jpeg", "image/jpg"):
+            ext = ".jpg"
+            mime_type = "image/jpeg"
+        elif mime_type == "image/webp":
+            ext = ".webp"
+
+        base_name = filename.rsplit(".", 1)[0] if "." in filename else filename
+        real_filename = f"{base_name}{ext}"
+
+        return (real_filename, image_bytes, mime_type)
+
 
     def _extract_reference_image_base64s(self, reference_images: Optional[List[Dict[str, Any]]]) -> List[str]:
         """从前端参考图数组中提取可传给模型的图片数据，不设置业务张数上限。"""
