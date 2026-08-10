@@ -1239,6 +1239,18 @@ class PosterService:
         """
         input_images = self._merge_input_images(input_image_base64, input_images_base64)
         first_input_image = input_images[0] if input_images else None
+        has_input = bool(input_images)
+        mode_label = "以图改图" if has_input else "文生图"
+
+        if image_model_config:
+            config_name = image_model_config.get("name", "未命名配置")
+            pt = image_model_config.get("provider_type", "unknown")
+            print(f"[PosterService] {mode_label} | 配置模型: {config_name} (provider_type={pt})")
+        elif provider_override:
+            print(f"[PosterService] {mode_label} | 引擎覆盖: {provider_override}")
+        else:
+            print(f"[PosterService] {mode_label} | 默认引擎: {self.provider}")
+        print(f"[PosterService] 提示词摘要: {prompt[:120]}{'...' if len(prompt) > 120 else ''}")
 
         if image_model_config:
             provider_type = image_model_config.get("provider_type")
@@ -1340,6 +1352,7 @@ class PosterService:
         aspect_ratio: Optional[str] = None,
     ) -> str:
         """调用 OpenAI Images 兼容接口。"""
+        import time as _time
         api_key = config.get("api_key", "")
         raw_base_url = (config.get("base_url") or "").rstrip("/")
         if raw_base_url.endswith("/v1"):
@@ -1348,7 +1361,7 @@ class PosterService:
             base_url = raw_base_url
         model = config.get("model_name") or config.get("model") or "gpt-image-2"
         size = self._resolve_api_size(aspect_ratio)
-
+        config_name = config.get("name", "OpenAI 兼容")
 
         if not api_key:
             raise ImageGenerationError(
@@ -1361,6 +1374,13 @@ class PosterService:
         input_images = self._merge_input_images(input_image_base64, input_images_base64)
         is_edit = bool(input_images)
         url = f"{base_url}/v1/images/{'edits' if is_edit else 'generations'}"
+
+        masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
+        print(f"[PosterService] {config_name} 使用模型: {model}")
+        print(f"[PosterService] {config_name} 基 URL: {url}")
+        print(f"[PosterService] {config_name} API Key: {masked_key}")
+        print(f"[PosterService] {config_name} 请求尺寸: {size}, 输入图片数: {len(input_images)}, 模式: {'edits' if is_edit else 'generations'}")
+        _api_start = _time.monotonic()
 
         payload: Dict[str, Any] = {
             "model": model,
@@ -1391,13 +1411,16 @@ class PosterService:
                         json=payload,
                         headers={**headers, "Content-Type": "application/json"},
                     )
+                _elapsed = (_time.monotonic() - _api_start) * 1000
                 result = self._safe_response_json(response)
+                print(f"[PosterService] {config_name} 响应: status={response.status_code}, 耗时={_elapsed:.0f}ms")
                 response_error = classify_provider_response(
                     "openai",
                     getattr(response, "status_code", 200),
                     result,
                 )
                 if response_error:
+                    print(f"[PosterService] {config_name} 生图失败: {response_error.safe_message} (status={response.status_code})")
                     raise response_error
 
                 data_list = result.get("data", [])
@@ -1708,6 +1731,12 @@ class PosterService:
             )
 
         url = f"{base_url}/v1beta/models/{model}:generateContent"
+
+        channel = dynamic_config.get("name", "动态配置") if dynamic_config else ("changhuai" if use_changhuai else "xunruijie")
+        masked_key = f"{api_key[:8]}...{api_key[-4:]}" if len(api_key) > 12 else "***"
+        print(f"[PosterService] Gemini 使用模型: {model}")
+        print(f"[PosterService] Gemini 基 URL: {url}")
+        print(f"[PosterService] Gemini 渠道: {channel}, API Key: {masked_key}")
 
         parts = []
         input_images = self._merge_input_images(input_image_base64, input_images_base64)
