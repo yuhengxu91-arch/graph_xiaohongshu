@@ -45,10 +45,10 @@
           图片生成引擎
         </label>
 
-        <div class="engine-options">
+        <div v-if="engineOptions.length" class="engine-options">
           <label
             v-for="engine in engineOptions"
-            :key="engine.value === null ? 'system' : engine.value"
+            :key="engine.value"
             class="engine-option"
             :class="{ active: selectedEngine === engine.value, inactive: engine.isInactive }"
           >
@@ -69,6 +69,12 @@
             </span>
             <span v-if="selectedEngine === engine.value" class="check-icon">✓</span>
           </label>
+        </div>
+        <div v-else class="empty-engine-notice">
+          <span>⚠️ 暂无已启用的公共模型配置</span>
+          <button v-if="canManageModels" type="button" class="ghost-btn-sm" @click="openCreateModelDialog">
+            + 点击新增模型
+          </button>
         </div>
       </div>
 
@@ -259,14 +265,6 @@ const props = defineProps({
 
 const emit = defineEmits(['update-prefs'])
 
-const builtinEngines = [
-  { value: null, icon: '⚙️', label: '跟随系统默认', desc: '使用管理员默认公共模型或 .env 全局配置' },
-  { value: 'gemini', icon: '💎', label: 'Gemini (xunruijie)', desc: 'gemini-3-pro-image-preview' },
-  { value: 'gpt_image', icon: '🖼️', label: 'GPT Image 2', desc: 'OpenAI GPT Image 2 生图 (scdn)' },
-  { value: 'doubao', icon: '🎨', label: '豆包 Seedream', desc: '火山方舟 doubao-seedream 生图' },
-]
-const validBuiltinValues = new Set(builtinEngines.map(engine => engine.value))
-
 const form = ref({
   default_aspect_ratio: '3:4',
   default_mode: 'custom',
@@ -293,7 +291,7 @@ const capabilityOptions = [
 const aspectRatioOptions = ['3:4', '2.35:1', '9:16', '1:1', '16:9']
 
 const engineOptions = computed(() => {
-  const publicModels = imageModels.value
+  return imageModels.value
     .filter(model => model.is_active)
     .map(model => ({
       value: `model:${model.id}`,
@@ -303,7 +301,6 @@ const engineOptions = computed(() => {
       isDefault: model.is_default,
       isInactive: !model.is_active,
     }))
-  return [...builtinEngines, ...publicModels]
 })
 
 const blankModelForm = () => ({
@@ -345,12 +342,12 @@ watch(() => props.prefs, (newVal) => {
       ...form.value,
       ...newVal,
       auto_save_to_gallery: newVal.auto_save_to_gallery ?? newVal.auto_save ?? true,
-      image_provider: validBuiltinValues.has(newVal.image_provider) ? newVal.image_provider : null,
+      image_provider: null,
       image_model_config_id: newVal.image_model_config_id || null,
     }
     selectedEngine.value = form.value.image_model_config_id
       ? `model:${form.value.image_model_config_id}`
-      : form.value.image_provider
+      : null
   }
 }, { immediate: true })
 
@@ -364,6 +361,15 @@ async function loadImageModels() {
     imageModels.value = data.items || []
     canManageModels.value = Boolean(data.can_manage)
     providerTypes.value = data.provider_types?.length ? data.provider_types : providerTypes.value
+
+    // 如果未选定模型配置但有可用配置，默认选中第1个或设为默认的模型
+    if (!form.value.image_model_config_id && imageModels.value.length > 0) {
+      const defaultModel = imageModels.value.find(m => m.is_default && m.is_active) || imageModels.value.find(m => m.is_active)
+      if (defaultModel) {
+        selectedEngine.value = `model:${defaultModel.id}`
+        form.value.image_model_config_id = defaultModel.id
+      }
+    }
   } catch (err) {
     imageModels.value = []
     canManageModels.value = false
@@ -373,11 +379,10 @@ async function loadImageModels() {
 function handleEngineChange() {
   if (typeof selectedEngine.value === 'string' && selectedEngine.value.startsWith('model:')) {
     form.value.image_model_config_id = selectedEngine.value.replace('model:', '')
-    form.value.image_provider = null
   } else {
     form.value.image_model_config_id = null
-    form.value.image_provider = validBuiltinValues.has(selectedEngine.value) ? selectedEngine.value : null
   }
+  form.value.image_provider = null
   debouncedSave()
 }
 

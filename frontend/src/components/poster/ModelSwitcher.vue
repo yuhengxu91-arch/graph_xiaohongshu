@@ -32,26 +32,9 @@
             <span class="item-icon">⚙️</span>
             <div class="item-info">
               <div class="item-name">跟随个人偏好</div>
-              <div class="item-desc">使用偏好设置中的模型</div>
+              <div class="item-desc">使用个人设置中的默认模型</div>
             </div>
             <span v-if="!modelValue" class="item-check">✓</span>
-          </button>
-
-          <!-- 内置模型 -->
-          <div class="dropdown-group">内置模型</div>
-          <button
-            v-for="engine in builtinOptions"
-            :key="engine.value"
-            class="dropdown-item"
-            :class="{ active: modelValue === engine.value }"
-            @click="selectModel(engine.value)"
-          >
-            <span class="item-icon">{{ engine.icon }}</span>
-            <div class="item-info">
-              <div class="item-name">{{ engine.label }}</div>
-              <div class="item-desc">{{ engine.desc }}</div>
-            </div>
-            <span v-if="modelValue === engine.value" class="item-check">✓</span>
           </button>
 
           <!-- 公共模型 -->
@@ -93,12 +76,6 @@ const showDropdown = ref(false)
 const switcherRef = ref(null)
 const imageModels = ref([])
 
-const builtinOptions = [
-  { value: 'builtin:gemini', icon: '💎', label: 'Gemini', desc: 'gemini-3-pro · xunruijie' },
-  { value: 'builtin:gpt_image', icon: '🖼️', label: 'GPT Image 2', desc: 'gpt-image-2 · scdn' },
-  { value: 'builtin:doubao', icon: '🎨', label: '豆包 Seedream', desc: 'doubao-seedream · 火山方舟' },
-]
-
 const configOptions = computed(() => {
   return imageModels.value
     .filter(m => m.is_active)
@@ -118,16 +95,12 @@ const currentDisplay = computed(() => {
     }
     return { icon: '⚙️', label: '跟随偏好', provider: '个人设置' }
   }
-  // 查找选中的模型
-  const builtin = builtinOptions.find(o => o.value === props.modelValue)
-  if (builtin) {
-    return { icon: builtin.icon, label: builtin.label, provider: builtin.desc }
-  }
+  // 查找选中的配置模型
   const config = configOptions.value.find(o => o.value === props.modelValue)
   if (config) {
     return { icon: config.icon, label: config.label, provider: config.desc }
   }
-  return { icon: '❓', label: '未知模型', provider: '' }
+  return { icon: '⚙️', label: '跟随偏好', provider: '个人设置' }
 })
 
 onMounted(async () => {

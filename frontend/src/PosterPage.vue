@@ -137,27 +137,6 @@ const activePanel = computed(() => {
   }
 })
 
-const builtinImageProviders = {
-  gemini: {
-    icon: '💎',
-    label: 'Gemini',
-    provider: 'xunruijie',
-    model: 'gemini-3-pro-image-preview',
-  },
-  gpt_image: {
-    icon: '🖼️',
-    label: 'GPT Image 2',
-    provider: 'scdn',
-    model: 'gpt-image-2',
-  },
-  doubao: {
-    icon: '🎨',
-    label: '豆包 Seedream',
-    provider: '火山方舟',
-    model: 'doubao-seedream',
-  },
-}
-
 const currentImageModel = computed(() => {
   const selectedModelId = preferences.value?.image_model_config_id
   if (selectedModelId) {
@@ -168,20 +147,12 @@ const currentImageModel = computed(() => {
         label: model.name,
         provider: providerLabel(model.provider_type),
         model: model.model_name,
-        source: '个人选择',
+        source: '个人偏好',
       }
     }
   }
 
-  const selectedProvider = preferences.value?.image_provider
-  if (selectedProvider && builtinImageProviders[selectedProvider]) {
-    return {
-      ...builtinImageProviders[selectedProvider],
-      source: '个人选择',
-    }
-  }
-
-  const defaultModel = imageModels.value.find(item => item.is_active && item.is_default)
+  const defaultModel = imageModels.value.find(item => item.is_active && item.is_default) || imageModels.value.find(item => item.is_active)
   if (defaultModel) {
     return {
       icon: providerIcon(defaultModel.provider_type),
@@ -193,11 +164,11 @@ const currentImageModel = computed(() => {
   }
 
   return {
-    icon: '⚙️',
-    label: '系统默认',
-    provider: '.env',
-    model: '全局配置',
-    source: '系统默认',
+    icon: '⚠️',
+    label: '未配置模型',
+    provider: '需新增模型',
+    model: '无可用引擎',
+    source: '未配置',
   }
 })
 

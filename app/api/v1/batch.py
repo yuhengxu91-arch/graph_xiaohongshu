@@ -197,27 +197,32 @@ async def _get_runtime_image_context(
         if kit:
             brand_kit = brand_service.serialize(kit)
 
-    # 优先使用前端传入的临时模型覆盖
+    # 1. 优先使用前端传入的临时模型覆盖
     if model_override:
         model_ref = await _resolve_model_override(db, model_override)
     
-    # 如果没有覆盖，回退到用户偏好
+    # 2. 如果没有覆盖，回退到用户偏好的数据库配置模型
     if not model_ref and current_user:
-        image_provider = await profile_service.get_user_image_provider(
-            db, user_id=current_user.id,
-        )
         model_ref = await profile_service.get_user_image_model_config(
             db, user_id=current_user.id,
         )
-        if not model_ref and image_provider:
-            model_ref = image_model_service.model_ref_for_builtin(image_provider)
 
+    # 3. 如果仍未确定模型，获取后台数据库中设为默认的配置模型
     if not model_ref:
         default_model = await image_model_service.get_default_config(db)
         if default_model:
             model_ref = image_model_service.model_ref_for_config(default_model)
         else:
-            model_ref = image_model_service.model_ref_for_builtin(poster_service.provider)
+            # 容错：若没有标记为 default 的配置，尝试获取任意已启用的配置
+            active_configs = await image_model_service.list_configs(db, include_inactive=False)
+            if active_configs:
+                model_ref = image_model_service.model_ref_for_config(active_configs[0])
+
+    if not model_ref:
+        raise HTTPException(
+            status_code=400,
+            detail="系统暂未配置任何已启用的图片模型，请联系管理员在后台【公共模型管理】中新增模型",
+        )
 
     return {
         "brand_kit": brand_kit,

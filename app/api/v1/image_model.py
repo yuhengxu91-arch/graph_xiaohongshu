@@ -144,22 +144,10 @@ async def list_model_channels(
     current_user: User = Depends(get_current_user),
     db: AsyncSession = Depends(get_async_session),
 ):
-    """返回所有内置模型 + 公共配置模型的通道列表，仅管理员可用。"""
+    """返回所有公共配置模型的通道列表，仅管理员可用。"""
     await _ensure_admin(db, current_user)
 
-    from app.services.image_fallback_service import BUILTIN_MODEL_NAMES
-
     channels = []
-
-    # 内置模型
-    for provider, display_name in BUILTIN_MODEL_NAMES.items():
-        channels.append({
-            "id": f"builtin:{provider}",
-            "name": display_name,
-            "source": "builtin",
-            "provider": provider,
-            "provider_type": None,
-        })
 
     # 公共配置模型
     configs = await image_model_service.list_configs(db, include_inactive=False)
