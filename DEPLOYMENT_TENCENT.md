@@ -575,15 +575,23 @@ docker compose up -d --build nginx
 
 ### 7.6 磁盘清理
 
+> **防爆盘**：`docker-compose.yml` 已为三个容器配置 Docker 日志上限  
+> （`json-file`，单文件最大 `50m`，最多保留 `3` 个，约 150MB/容器）。  
+> 修改后需 `docker compose up -d` 重建容器才会生效。
+
 ```bash
 # 查看磁盘使用
 df -h
 
 # 查看大目录
+du -sh /opt/graph_xiaohongshu/logs /opt/graph_xiaohongshu/static
 du -sh /opt/graph_xiaohongshu/static/images/*
 
 # Docker 空间占用分析
 docker system df
+
+# 清理构建缓存（通常占用最大，可回收数 GB）
+docker builder prune -af
 
 # 清理未使用的镜像、容器、网络
 docker system prune -a
@@ -592,8 +600,8 @@ docker system prune -a
 find /opt/graph_xiaohongshu/static/images/generated -name "*.png" -mtime +7 -delete
 find /opt/graph_xiaohongshu/static/images/posters -name "*.png" -mtime +7 -delete
 
-# 清理日志文件（保留最近 7 天）
-find /opt/graph_xiaohongshu/logs -name "*.log" -mtime +7 -delete
+# 清理应用日志文件（保留最近 7 天；应用本身也会按天轮转保留 30 天）
+find /opt/graph_xiaohongshu/logs -name "*.log*" -mtime +7 -delete
 ```
 
 ### 7.7 系统监控

@@ -1,3 +1,9 @@
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "50m"
+    max-file: "3"
+
 services:
   # ============ PostgreSQL 数据库 ============
   postgres:
@@ -16,6 +22,7 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+    logging: *default-logging
     deploy:
       resources:
         limits:
@@ -39,6 +46,7 @@ services:
     volumes:
       - ./static:/app/static
       - ./logs:/app/logs
+    logging: *default-logging
     deploy:
       resources:
         limits:
@@ -55,6 +63,7 @@ services:
       - backend
     ports:
       - "127.0.0.1:8080:80"
+    logging: *default-logging
     deploy:
       resources:
         limits:
