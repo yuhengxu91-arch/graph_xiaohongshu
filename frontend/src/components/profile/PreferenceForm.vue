@@ -243,11 +243,24 @@
         </form>
       </div>
     </div>
+
+    <!-- 自定义确认弹窗 -->
+    <ConfirmModal
+      :is-open="confirmModal.isOpen"
+      :title="confirmModal.title"
+      :message="confirmModal.message"
+      :confirm-text="confirmModal.confirmText"
+      :cancel-text="confirmModal.cancelText"
+      :danger="confirmModal.danger"
+      @confirm="handleConfirm"
+      @cancel="handleCancelConfirm"
+    />
   </div>
 </template>
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
+import ConfirmModal from '../common/ConfirmModal.vue'
 import {
   createImageModel,
   deleteImageModel,
@@ -540,8 +553,52 @@ async function markDefaultModel(model) {
   }
 }
 
+// ============== 确认弹窗状态 ==============
+const confirmModal = ref({
+  isOpen: false,
+  title: '确认删除',
+  message: '',
+  confirmText: '确定删除',
+  cancelText: '取消',
+  danger: true,
+  resolve: null,
+})
+
+function showConfirm(options) {
+  return new Promise((resolve) => {
+    confirmModal.value = {
+      ...confirmModal.value,
+      ...options,
+      isOpen: true,
+      resolve,
+    }
+  })
+}
+
+function handleConfirm() {
+  if (confirmModal.value.resolve) {
+    confirmModal.value.resolve(true)
+  }
+  confirmModal.value.isOpen = false
+}
+
+function handleCancelConfirm() {
+  if (confirmModal.value.resolve) {
+    confirmModal.value.resolve(false)
+  }
+  confirmModal.value.isOpen = false
+}
+
 async function removeModel(model) {
-  if (!window.confirm(`确定删除公共模型「${model.name}」吗？`)) return
+  const ok = await showConfirm({
+    title: '删除公共模型',
+    message: `确定要删除公共模型「${model.name}」吗？删除后所有用户将无法再选用此通道。`,
+    confirmText: '确定删除',
+    cancelText: '取消',
+    danger: true,
+  })
+  if (!ok) return
+
   modelMsg.value = '正在删除模型...'
   modelMsgError.value = false
   try {

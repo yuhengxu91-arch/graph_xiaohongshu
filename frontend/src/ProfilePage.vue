@@ -61,6 +61,18 @@
         <p class="text-slate-400 font-medium animate-pulse">正在同步您的个人资产...</p>
       </div>
     </div>
+
+    <!-- 退出登录确认弹窗 -->
+    <ConfirmModal
+      :is-open="showLogoutConfirm"
+      title="退出登录"
+      message="确定要退出当前登录账号吗？退出后需重新输入凭证。"
+      confirm-text="确认退出"
+      cancel-text="取消"
+      :danger="true"
+      @confirm="confirmLogoutAction"
+      @cancel="showLogoutConfirm = false"
+    />
   </div>
 </template>
 
@@ -81,6 +93,7 @@ import QuickLinks from './components/profile/QuickLinks.vue'
 import PreferenceForm from './components/profile/PreferenceForm.vue'
 import PasswordForm from './components/profile/PasswordForm.vue'
 import ModelChannelPanel from './components/profile/ModelChannelPanel.vue'
+import ConfirmModal from './components/common/ConfirmModal.vue'
 
 const emit = defineEmits(['navigate', 'logout', 'profile-updated'])
 
@@ -91,6 +104,7 @@ const profile = ref({})
 const stats = ref({})
 const preferences = ref({})
 const canManageModels = ref(false)
+const showLogoutConfirm = ref(false)
 
 onMounted(async () => {
   await loadBaseProfile()
@@ -169,8 +183,11 @@ function handleNavigate(page) {
 }
 
 function handleLogout() {
-  if (confirm('确定要退出登录吗？')) {
-    emit('logout')
-  }
+  showLogoutConfirm.value = true
+}
+
+function confirmLogoutAction() {
+  showLogoutConfirm.value = false
+  emit('logout')
 }
 </script>
